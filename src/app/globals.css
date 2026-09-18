@@ -1,0 +1,122 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/*
+ * JFR Ranch brand tokens.
+ * Palette derived from the client's own longhorn field-app icon (near-black ink,
+ * cream ground) extended with an olive-green primary and a rust/copper accent —
+ * see /data/README.md and docs/brand-palette.md for how these were chosen and
+ * validated for categorical chart use (dataviz color-formula six checks).
+ */
+:root {
+  --background: #f7f6f1;
+  --foreground: #1a1e16;
+  --card: #ffffff;
+  --card-foreground: #1a1e16;
+  --popover: #ffffff;
+  --popover-foreground: #1a1e16;
+  --primary: #3f5c2a;
+  --primary-foreground: #ffffff;
+  --secondary: #f1efe6;
+  --secondary-foreground: #1a1e16;
+  --muted: #f1efe6;
+  --muted-foreground: #6b6a5e;
+  --accent: #efe6d8;
+  --accent-foreground: #1a1e16;
+  --destructive: #d03b3b;
+  --destructive-foreground: #ffffff;
+  --border: #e3e1d5;
+  --input: #e3e1d5;
+  --ring: #6e8f2e;
+  --radius: 0.625rem;
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: #1a1e16;
+  --sidebar-primary: #3f5c2a;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f1efe6;
+  --sidebar-accent-foreground: #1a1e16;
+  --sidebar-border: #e3e1d5;
+  --sidebar-ring: #6e8f2e;
+
+  /* Categorical chart series (validated: node scripts/validate_palette.js — see docs/brand-palette.md) */
+  --chart-1: #c1602a; /* rust / terracotta */
+  --chart-2: #0b7aa0; /* steel blue */
+  --chart-3: #6e8f2e; /* olive / moss green */
+  --chart-4: #8c3560; /* plum / wine */
+
+  /* Diverging pair (Market Position unrealized gain/loss, cost bridges) */
+  --chart-positive: #6e8f2e;
+  --chart-positive-tint: #dce8c9;
+  --chart-negative: #c1602a;
+  --chart-negative-tint: #f3dccb;
+  --chart-neutral: #cfcdbf;
+
+  /* Sequential ramp (magnitude — single hue, light -> dark) */
+  --chart-seq-100: #dceef5;
+  --chart-seq-400: #0b7aa0;
+  --chart-seq-700: #053446;
+
+  /* Status — fixed, never themed (reconciliation state, exceptions) */
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+
+  /* Data-provenance badges (Position Desk Rule 1: every number is labeled) */
+  --prov-measured: #1a1e16;
+  --prov-sourced: #0b7aa0;
+  --prov-modeled: #6e8f2e;
+  --prov-assumed: #a8783c;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-sans: "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: Consolas, "Courier New", monospace;
+  --font-heading: var(--font-sans);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}

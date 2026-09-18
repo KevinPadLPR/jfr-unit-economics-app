@@ -35,7 +35,7 @@ export function getGlLotSummary(lot: string): GlLotSummaryRow | undefined {
 
 export function listGlLots(): GlLotSummaryRow[] {
   const db = getDb();
-  return db.prepare(`SELECT * FROM gl_lot_summary ORDER BY status, lot`).all() as GlLotSummaryRow[];
+  return db.prepare(`SELECT * FROM gl_lot_summary ORDER BY status, lot`).all() as unknown as GlLotSummaryRow[];
 }
 
 export interface CostOfGainResult {

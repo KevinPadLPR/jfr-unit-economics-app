@@ -25,7 +25,7 @@ interface ScheduleRow {
 
 export function getLotScorecard(): ScorecardRow[] {
   const db = getDb();
-  const schedule = db.prepare(`SELECT lot, feed_type, location_type FROM gl_master_lot_schedule`).all() as ScheduleRow[];
+  const schedule = db.prepare(`SELECT lot, feed_type, location_type FROM gl_master_lot_schedule`).all() as unknown as ScheduleRow[];
   const scheduleByLot = new Map(schedule.map((s) => [s.lot, s]));
 
   return listGlLots().map((lot) => {

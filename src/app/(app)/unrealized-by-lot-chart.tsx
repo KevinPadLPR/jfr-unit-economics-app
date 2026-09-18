@@ -33,10 +33,13 @@ export function UnrealizedByLotChart({ data }: { data: Row[] }) {
             <YAxis tickFormatter={(v) => formatMoney(v)} width={90} tick={{ fontSize: 11 }} />
             <ReferenceLine y={0} stroke="var(--baseline, #c3c2b7)" />
             <Tooltip
-              formatter={(value: number, _name, item) => [
-                `${formatMoney(value)}${item.payload.lightCalfCaveat ? " (light-calf mark — see note)" : ""}`,
-                "Unrealized",
-              ]}
+              formatter={(value, _name, item) => {
+                const payload = item?.payload as Row | undefined;
+                return [
+                  `${formatMoney(Number(value))}${payload?.lightCalfCaveat ? " (light-calf mark — see note)" : ""}`,
+                  "Unrealized",
+                ];
+              }}
             />
             <Bar dataKey="unrealized" radius={[4, 4, 4, 4]}>
               {data.map((row) => (

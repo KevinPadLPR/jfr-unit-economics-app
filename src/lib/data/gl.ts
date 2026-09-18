@@ -51,7 +51,7 @@ export function getDirectCostBreakdown(lot: string): GlCostBreakdownRow[] {
        GROUP BY report_line
        ORDER BY total DESC`
     )
-    .all(lot) as GlCostBreakdownRow[];
+    .all(lot) as unknown as GlCostBreakdownRow[];
 }
 
 export interface WeeklyCostPoint {
@@ -79,5 +79,5 @@ export function getWeeklyCostSeries(lot: string): WeeklyCostPoint[] {
        LIMIT 13`
     )
     .all(lot)
-    .reverse() as WeeklyCostPoint[];
+    .reverse() as unknown as WeeklyCostPoint[];
 }

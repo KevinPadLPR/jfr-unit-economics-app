@@ -25,7 +25,7 @@ export function CostBreakdownChart({ data }: { data: Row[] }) {
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
             <XAxis type="number" tickFormatter={(v) => formatMoney(v)} tick={{ fontSize: 11 }} />
             <YAxis type="category" dataKey="report_line" width={150} tick={{ fontSize: 11 }} />
-            <Tooltip formatter={(value: number) => [formatMoney(value), "Amount"]} />
+            <Tooltip formatter={(value) => [formatMoney(Number(value)), "Amount"]} />
             <Bar dataKey="total" radius={[0, 4, 4, 0]} fill={CATEGORICAL.steelBlue} />
           </BarChart>
         </ResponsiveContainer>

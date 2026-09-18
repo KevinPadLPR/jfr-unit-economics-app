@@ -34,6 +34,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         const valid = await bcrypt.compare(password, row.password_hash);
         if (!valid) return null;
+        if (!isRole(row.role)) return null;
 
         return { id: row.id, email: row.email, name: row.name, role: row.role };
       },

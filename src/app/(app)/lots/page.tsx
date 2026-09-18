@@ -27,7 +27,7 @@ export default async function LotsPage() {
       `SELECT lot, feed_type, location_type, state, interest, death_loss, slide, premium, latest_gl_date, action
        FROM gl_master_lot_schedule`
     )
-    .all() as ScheduleRow[];
+    .all() as unknown as ScheduleRow[];
   const scheduleByLot = new Map(schedule.map((s) => [s.lot, s]));
 
   return (

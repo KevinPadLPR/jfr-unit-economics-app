@@ -28,7 +28,7 @@ export function WeeklyCostChart({ data }: { data: Row[] }) {
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
             <XAxis dataKey="week_end" tickFormatter={formatDate} tick={{ fontSize: 10 }} />
             <YAxis tickFormatter={(v) => formatMoney(v)} width={80} tick={{ fontSize: 11 }} />
-            <Tooltip labelFormatter={formatDate} formatter={(value: number) => formatMoney(value)} />
+            <Tooltip labelFormatter={(label) => formatDate(String(label))} formatter={(value) => formatMoney(Number(value))} />
             <Legend wrapperStyle={{ fontSize: 12 }} />
             <Bar dataKey="direct" name="Direct" stackId="cost" fill={CATEGORICAL.olive} radius={[0, 0, 0, 0]} />
             <Bar dataKey="indirect" name="Indirect" stackId="cost" fill={CATEGORICAL.rust} radius={[4, 4, 0, 0]} />

@@ -1,4 +1,4 @@
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import path from "node:path";
 import fs from "node:fs";
 
@@ -26,23 +26,26 @@ type Row = Record<string, unknown>;
  * node:sqlite returns rows with a null prototype (`Object.create(null)`).
  * React Server Components refuse to serialize those to Client Components
  * ("Only plain objects... can be passed"), so every row is spread into a
- * plain object here, once, instead of at every call site.
+ * plain object here, once, instead of at every call site. Callers cast the
+ * result to their own row interface (`as SomeRow[]`) — kept untyped-generic
+ * here on purpose, since a generic `all<T>()` produced confusing inference
+ * once chained with array methods like `.reverse()`.
  */
-function toPlain<T>(row: T): T {
-  return row == null ? row : ({ ...(row as Row) } as T);
+function toPlain(row: unknown): Row | undefined {
+  return row == null ? undefined : { ...(row as Row) };
 }
 
 export interface PreparedStatement {
-  all<T = Row>(...params: unknown[]): T[];
-  get<T = Row>(...params: unknown[]): T | undefined;
-  run(...params: unknown[]): { changes: number | bigint; lastInsertRowid: number | bigint };
+  all(...params: SQLInputValue[]): Row[];
+  get(...params: SQLInputValue[]): Row | undefined;
+  run(...params: SQLInputValue[]): { changes: number | bigint; lastInsertRowid: number | bigint };
 }
 
 export interface AppDb {
   prepare(sql: string): PreparedStatement;
 }
 
-let db: AppDb | null = null;
+let db: AppDb | undefined;
 
 export class DataUnavailableError extends Error {}
 
@@ -54,15 +57,16 @@ export function getDb(): AppDb {
     );
   }
   const raw = new DatabaseSync(DB_PATH, { readOnly: true });
-  db = {
-    prepare(sql: string) {
+  const wrapped: AppDb = {
+    prepare(sql: string): PreparedStatement {
       const stmt = raw.prepare(sql);
       return {
-        all: (...params: unknown[]) => (stmt.all(...params) as Row[]).map(toPlain),
-        get: (...params: unknown[]) => toPlain(stmt.get(...params)),
-        run: (...params: unknown[]) => stmt.run(...params),
+        all: (...params: SQLInputValue[]) => (stmt.all(...params) as unknown[]).map((r) => toPlain(r) as Row),
+        get: (...params: SQLInputValue[]) => toPlain(stmt.get(...params)),
+        run: (...params: SQLInputValue[]) => stmt.run(...params),
       };
     },
   };
-  return db;
+  db = wrapped;
+  return wrapped;
 }

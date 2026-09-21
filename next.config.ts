@@ -1,11 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  images: {
-    // Brand assets in public/brand/*.svg are served through next/image.
-    dangerouslyAllowSVG: true,
-    contentDispositionType: "attachment",
-    contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
+  // src/lib/db.ts reads data/dev.sqlite via a dynamic fs path (process.cwd()
+  // + "data/dev.sqlite"), which Next's automatic output file tracing can't
+  // detect statically — without this, the file gets left out of the Vercel
+  // serverless bundle and every page 500s in production despite building fine.
+  outputFileTracingIncludes: {
+    "/**/*": ["./data/dev.sqlite"],
   },
 };
 

@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { LayoutDashboard, TrendingUp, ClipboardList, LineChart, ListTree, LogOut } from "lucide-react";
 import { auth, signOut } from "@/auth";
@@ -19,7 +18,8 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     <div className="flex min-h-screen">
       <aside className="flex w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
         <div className="flex flex-col items-center gap-1 border-b border-sidebar-border px-4 py-6">
-          <Image src="/brand/logo-lockup.svg" alt="JFR Ranch" width={130} height={114} priority />
+          {/* eslint-disable-next-line @next/next/no-img-element -- static SVG logo, no benefit from next/image's raster optimizer */}
+          <img src="/brand/logo-lockup.svg" alt="JFR Ranch" width={130} height={114} />
           <p className="text-center text-xs font-medium text-muted-foreground">
             Unit Economics &amp; Position Desk
           </p>

@@ -40,8 +40,7 @@ here yet (see the handoff doc §3 for what ranchers actually asked for).
 
 ## Data: SQLite now, Supabase later
 
-This app reads a local SQLite file (`data/dev.sqlite`, gitignored — it holds real client
-financial and cattle data and must never be committed) built by two scripts:
+This app reads a local SQLite file (`data/dev.sqlite`) built by two scripts:
 
 - `scripts/build_dev_db.py` — real ranch data. GL-derived tables (prefixed `gl_*`) come
   from the Unit Economics Excel project's latest ETL output; app-native tables (`lots`,
@@ -52,12 +51,17 @@ financial and cattle data and must never be committed) built by two scripts:
 - `scripts/seed_users.mjs` — the `app_users` auth table (Node/bcryptjs, kept separate from
   the Python data import on purpose).
 
+**`data/dev.sqlite` is committed to this repo** (as of 2026-09-21, Kevin's call) so the
+Vercel deployment has working data and login before the real Supabase sync exists. It
+contains real JFR Ranch financial and cattle data — **keep this repo private.**
+`next.config.ts`'s `outputFileTracingIncludes` forces Vercel to bundle the file (Next's
+automatic tracing can't see the dynamic `fs` path in `src/lib/db.ts`); if pages start
+500ing in production after a config change, check that first. Only the WAL/SHM/journal
+sidecar files stay gitignored (regenerated automatically, not meaningful to diff).
+
 Everything in `src/lib/data/*.ts` is written as plain SQL against this schema so that
 pointing at real Supabase instead of SQLite later is a matter of swapping `src/lib/db.ts`
-— not rewriting every query. That sync job doesn't exist yet (see handoff doc §5b/§7);
-until it does, this repo's Vercel deployment has no real data source configured in
-production (`data/dev.sqlite` is dev-only and isn't shipped), and will show the "report
-unavailable" state rather than crash.
+— not rewriting every query. That sync job doesn't exist yet (see handoff doc §5b/§7).
 
 ## Brand
 

@@ -1,4 +1,3 @@
-import Image from "next/image";
 import { auth, signOut } from "@/auth";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,7 +7,8 @@ export default async function RancherHome() {
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background px-4">
-      <Image src="/brand/logo-lockup.svg" alt="JFR Ranch" width={140} height={122} priority />
+      {/* eslint-disable-next-line @next/next/no-img-element -- static SVG logo, no benefit from next/image's raster optimizer */}
+      <img src="/brand/logo-lockup.svg" alt="JFR Ranch" width={140} height={122} />
       <Card className="w-full max-w-md text-center">
         <CardHeader>
           <CardTitle>Hi, {session?.user?.name ?? "there"}</CardTitle>

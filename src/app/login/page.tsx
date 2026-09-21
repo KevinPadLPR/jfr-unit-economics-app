@@ -3,7 +3,6 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
-import Image from "next/image";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
@@ -32,7 +31,8 @@ export default function LoginPage() {
     <main className="flex min-h-screen items-center justify-center bg-background px-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="items-center pb-2 text-center">
-          <Image src="/brand/logo-lockup.svg" alt="JFR Ranch" width={160} height={140} priority />
+          {/* eslint-disable-next-line @next/next/no-img-element -- static SVG logo, no benefit from next/image's raster optimizer */}
+          <img src="/brand/logo-lockup.svg" alt="JFR Ranch" width={160} height={140} />
           <CardTitle className="text-lg text-foreground">Position Desk</CardTitle>
           <CardDescription>Unit Economics &amp; Market Position</CardDescription>
         </CardHeader>

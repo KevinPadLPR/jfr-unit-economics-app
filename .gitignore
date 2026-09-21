@@ -32,14 +32,18 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
 
-# dev database — real client financial/cattle data, built locally by
-# scripts/build_dev_db.py + scripts/seed_users.mjs. Never commit this.
-/data/*.sqlite
-/data/*.sqlite-*
+# dev database — contains real JFR Ranch financial/cattle data. Committed to
+# this repo on purpose (2026-09-21, Kevin's call) so the Vercel deploy has
+# working data/login before the real Supabase sync exists. Keep this repo
+# PRIVATE. Only *.sqlite-wal/-shm/-journal (regenerable) stay ignored.
+/data/*.sqlite-wal
+/data/*.sqlite-shm
+/data/*.sqlite-journal
 
 # typescript
 *.tsbuildinfo

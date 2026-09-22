@@ -1,4 +1,3 @@
-import { getDb } from "@/lib/db";
 import { listGlLots, getCostOfGain, getConfidenceGrade } from "@/lib/data/cost-of-gain";
 
 export interface ScorecardRow {
@@ -17,26 +16,18 @@ export interface ScorecardRow {
   useForBenchmark: boolean;
 }
 
-interface ScheduleRow {
-  lot: string;
-  feed_type: string | null;
-  location_type: string | null;
-}
-
 export function getLotScorecard(): ScorecardRow[] {
-  const db = getDb();
-  const schedule = db.prepare(`SELECT lot, feed_type, location_type FROM gl_master_lot_schedule`).all() as unknown as ScheduleRow[];
-  const scheduleByLot = new Map(schedule.map((s) => [s.lot, s]));
-
+  // master_lot_schedule already carries feed_type/location_type on the same
+  // row as everything else (docs/PROMPT - Master Schedule Unification.md
+  // §3) — one query via listGlLots() instead of two.
   return listGlLots().map((lot) => {
     const cog = getCostOfGain(lot.lot);
-    const sched = scheduleByLot.get(lot.lot);
     return {
       lot: lot.lot,
       profitCenter: lot.profit_center,
       status: lot.status,
-      feedType: sched?.feed_type ?? null,
-      locationType: sched?.location_type ?? null,
+      feedType: lot.feed_type,
+      locationType: lot.location_type,
       headIn: lot.head_in,
       headOnHand: lot.head_on_hand,
       avgDof: lot.avg_dof,

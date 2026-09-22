@@ -9,37 +9,55 @@ This script is idempotent: every table it manages is dropped and
 recreated on each run, so `python build_dev_db.py` always produces a
 byte-for-byte-equivalent database from the same source files.
 
-There are three families of output tables (see `web/data/README.md`
+There are four families of output tables (see `web/data/README.md`
 for the full narrative, including known data-quality caveats):
 
 1. `gl_*` tables      - derived from the CenterPoint General Ledger /
                          "Unit Economics Reporting" Excel pipeline.
                          Real DOLLAR figures.
-2. App-native tables  - copied verbatim (same name, same columns) from
+2. `master_lot_schedule` /
+   `master_crop_schedule` - the unified lot/crop-lot dimension tables,
+                         pulled live from Supabase (see
+                         docs/PROMPT - Master Schedule Unification.md).
+                         That project's `supabase_sync.py` is the one
+                         place that writes these two tables; this
+                         script only reads them, same as the deployed
+                         app eventually will.
+3. App-native tables  - copied verbatim (same name, same columns) from
                          a snapshot of the client's Supabase cattle
                          management app. Real HEAD COUNTS, WEIGHTS,
-                         DATES, MARKET QUOTES, HEDGE POSITIONS.
-3. `lot_crosswalk` /
-   `lot_attrs_app_cohort` - bridge/reference tables tying the two
-                         systems together (they do NOT share a lot
-                         identity - see README).
+                         DATES, MARKET QUOTES, HEDGE POSITIONS. This is
+                         a *different* Supabase project from #2 above
+                         (John's field-app project, not JFR's own) -
+                         still sourced from the local ranch.sqlite
+                         snapshot, not a live connection.
+4. `lot_crosswalk`   - bridge table tying the two systems together
+                         (they do NOT share a lot identity - see
+                         README).
 
 No table in this script is invented or backfilled: every row here is
-copied straight out of one of the real source files below. Where a
-source file didn't match what an earlier scoping pass assumed, this
+copied straight out of one of the real source files/APIs below. Where
+a source didn't match what an earlier scoping pass assumed, this
 script uses what actually exists and the discrepancy is called out in
 a comment at the point it was discovered (also summarized in the
 README).
 
-Requires: Python 3.14 stdlib (sqlite3, csv, datetime, pathlib) plus
-`openpyxl` for reading .xlsx files. No pandas/bcrypt dependency.
+Requires: Python 3.14 stdlib (sqlite3, csv, datetime, pathlib, urllib)
+plus `openpyxl` for reading .xlsx files. No pandas/bcrypt/supabase-py
+dependency - the Supabase reads in this script are plain REST calls
+via urllib, matching the "minimal deps" rule the rest of this script
+already followed.
 """
 
 from __future__ import annotations
 
 import csv
 import datetime
+import json
+import os
 import sqlite3
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import openpyxl
@@ -93,42 +111,73 @@ GL_DATABASE_DIR = Path(
     r"C:\Users\UserTwo\Box\Working\Reagan Ranch\Unit Economics Reporting\Database"
 )
 ACCOUNT_MAP_XLSX = GL_DATABASE_DIR / "Account Map.xlsx"
-LOT_MASTER_XLSX = GL_DATABASE_DIR / "Lot Master.xlsx"
-MASTER_LOT_SCHEDULE_XLSX = GL_DATABASE_DIR / "Master Lot Schedule.xlsx"
 
-# --- Source 2: Supabase cattle-management app snapshot ---------------------
-RANCH_SQLITE = Path(
-    r"C:\Users\UserTwo\Box\Working\Reagan Ranch\Supabase Connection\data\ranch.sqlite"
-)
+# --- Source 2: Supabase (JFR's own project) - master_lot_schedule / master_crop_schedule ---
+# JFR_-prefixed on purpose (not generic SUPABASE_URL/SUPABASE_SERVICE_KEY) -
+# this machine's Dagster orchestration already owns those generic names for
+# a different project; see Unit Economics Reporting/supabase_sync.py, which
+# writes the two tables this script reads.
+ENV_LOCAL_PATH = WEB_DIR / ".env.local"
+# Fallback source for the same two variables: the sibling Excel project
+# already has them (it's the same Supabase project supabase_sync.py writes
+# to) - reusing that file means the credentials only need to be set in one
+# place, not copy-pasted between two .env files.
+UNIT_ECON_ENV_PATH = WEB_DIR.parent.parent / "Unit Economics Reporting" / ".env"
 
-# --- Source 3: crosswalk + app-cohort attribute rollup handoff -------------
-HANDOFF_ETL_DIR = Path(
-    r"C:\Users\UserTwo\Box\Working\Reagan Ranch"
-    r"\2026-09-11 JFR Position Desk Data Layer - Handoff\etl"
-)
-CROSSWALK_CSV = HANDOFF_ETL_DIR / "crosswalk_seed.csv"
-LOT_ATTRS_CSV = HANDOFF_ETL_DIR / "out" / "App_LotAttrs.csv"
 
-# The exact list of Supabase app tables to copy verbatim (same table name,
-# same columns) into dev.sqlite. This is a small subset of the ~120 tables
-# in the full Supabase snapshot - only the ones this dashboard needs.
-APP_NATIVE_TABLES = [
-    "lots",
-    "lot_status",
-    "invoices",
-    "sales",
-    "lot_events",
-    "lot_daily_head",
-    "lot_weight_anchor",
-    "lot_realized_adg",
-    "market_quotes",
-    "positions",
-    "position_lot_links",
-    "hedge_coverage_by_month",
-    "lot_budgets",
-    "delivery_receipts",
-    "shipments",
-]
+def _load_dotenv(path: Path) -> None:
+    """Minimal .env loader (same approach as supabase_sync.py) - avoids
+    adding a dependency for two variables Next.js itself loads at runtime
+    but this standalone script needs to load itself. Uses setdefault, so
+    the first file loaded (web/.env.local) wins if a name appears in both."""
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        value = value.strip().strip('"').strip("'")
+        # Skip blank values (e.g. an unfilled placeholder line in
+        # web/.env.local) so they don't block UNIT_ECON_ENV_PATH's fallback
+        # via setdefault below.
+        if value:
+            os.environ.setdefault(key.strip(), value)
+
+
+_load_dotenv(ENV_LOCAL_PATH)
+_load_dotenv(UNIT_ECON_ENV_PATH)
+
+SUPABASE_URL = os.environ.get("JFR_SUPABASE_URL")
+SUPABASE_SECRET_KEY = os.environ.get("JFR_SUPABASE_SECRET_KEY")
+
+
+def fetch_supabase_table(table: str) -> list[dict]:
+    """Read every row of `table` via Supabase's PostgREST API (a plain GET,
+    no supabase-py dependency). Both tables this script reads are small
+    (tens of rows), so no pagination is needed - PostgREST's default page
+    size (1000) covers them comfortably."""
+    if not SUPABASE_URL or not SUPABASE_SECRET_KEY:
+        raise RuntimeError(
+            "JFR_SUPABASE_URL / JFR_SUPABASE_SECRET_KEY not set. Add them to "
+            f"{ENV_LOCAL_PATH} - see Unit Economics Reporting/"
+            "'Guide - Supabase Setup for JFR Sync.md' for how to get them "
+            "(same Supabase project supabase_sync.py already pushes to)."
+        )
+    url = f"{SUPABASE_URL.rstrip('/')}/rest/v1/{table}?select=*"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "apikey": SUPABASE_SECRET_KEY,
+            "Authorization": f"Bearer {SUPABASE_SECRET_KEY}",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Supabase GET {table} failed ({exc.code}): {body}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -181,21 +230,6 @@ def csv_value(v):
     return v if v not in ("", None) else None
 
 
-def csv_number(v):
-    """Best-effort numeric cast for CSV cells: int, then float, else NULL/text."""
-    v = csv_value(v)
-    if v is None:
-        return None
-    try:
-        return int(v)
-    except ValueError:
-        pass
-    try:
-        return float(v)
-    except ValueError:
-        return v
-
-
 # ---------------------------------------------------------------------------
 # Part 1: gl_* tables from the Unit Economics Excel workbook
 # ---------------------------------------------------------------------------
@@ -239,53 +273,6 @@ def build_gl_transactions(conn: sqlite3.Connection, wb) -> int:
     )
     conn.execute("CREATE INDEX idx_gl_transactions_lot ON gl_transactions(lot)")
     conn.execute("CREATE INDEX idx_gl_transactions_date ON gl_transactions(date)")
-    return len(rows)
-
-
-def build_gl_lot_summary(conn: sqlite3.Connection, wb) -> int:
-    conn.execute("DROP TABLE IF EXISTS gl_lot_summary")
-    conn.execute(
-        """
-        CREATE TABLE gl_lot_summary (
-            lot                       TEXT PRIMARY KEY,
-            profit_center             TEXT,
-            status                    TEXT,
-            production_year           INTEGER,
-            date_in                   TEXT,
-            last_activity             TEXT,
-            books_through             TEXT,
-            head_in                   INTEGER,
-            head_sold                 INTEGER,
-            head_dead                 INTEGER,
-            head_transferred_out      INTEGER,
-            head_on_hand              INTEGER,
-            head_days                 REAL,
-            avg_dof                   REAL,
-            lbs_in                    REAL,
-            avg_wt_in                 REAL,
-            cost_in_dollars           REAL,
-            cost_in_dollars_per_head  REAL,
-            target_adg                REAL,
-            market_dollars_per_cwt    REAL,
-            target_out_date           TEXT,
-            use_for_benchmark         TEXT,
-            head_data                 TEXT,
-            notes                     TEXT
-        )
-        """
-    )
-    ws = wb["Data_Lots"]
-    rows = list(read_sheet_rows(ws, header_row=1))
-    # Sanity check baked into the build: `lot` must be unique, since it is
-    # used as the primary key and as the join target from lot_crosswalk.
-    lots_seen = [r[0] for r in rows]
-    assert len(lots_seen) == len(set(lots_seen)), (
-        "gl_lot_summary.lot is not unique - primary key assumption violated"
-    )
-    conn.executemany(
-        "INSERT INTO gl_lot_summary VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        rows,
-    )
     return len(rows)
 
 
@@ -375,71 +362,124 @@ def build_gl_account_map(conn: sqlite3.Connection) -> int:
     return len(rows)
 
 
-def build_gl_lot_master(conn: sqlite3.Connection) -> int:
-    conn.execute("DROP TABLE IF EXISTS gl_lot_master")
+# ---------------------------------------------------------------------------
+# Part 2: master_lot_schedule / master_crop_schedule, live from Supabase
+# ---------------------------------------------------------------------------
+# Column order/names mirror Unit Economics Reporting/supabase_sync.py's
+# MASTER_LOT_SCHEDULE_COLUMN_MAP / MASTER_CROP_SCHEDULE_COLUMN_MAP values
+# (the snake_case side) exactly - that script is the source of truth for
+# these names, not retyped here independently. See
+# docs/PROMPT - Master Schedule Unification.md §1 for the full DDL history.
+
+MASTER_LOT_SCHEDULE_COLUMNS = [
+    "lot", "profit_center", "status", "production_year", "date_in", "last_activity",
+    "books_through", "head_in", "head_sold", "head_dead", "head_transferred_out",
+    "head_on_hand", "head_days", "avg_dof", "lbs_in", "avg_wt_in", "cost_in_dollars",
+    "cost_in_dollars_per_head", "head_data", "has_app_data", "app_sub_lots",
+    "head_in_app", "head_current_app", "avg_weight_in_app",
+    "projected_current_weight_app", "adg_used", "adg_source", "anchor_type",
+    "anchor_date", "days_since_anchor", "weight_stale_over_60d", "crosswalk_flag",
+    "display_name", "target_adg", "market_dollars_per_cwt", "target_out_date",
+    "budget_cost_per_head", "use_for_benchmark", "feed_type", "location_type",
+    "state", "interest", "death_loss", "slide", "premium", "action", "notes",
+]
+
+MASTER_CROP_SCHEDULE_COLUMNS = [
+    "crop_lot", "profit_center", "status", "production_year", "date_in",
+    "last_activity", "books_through", "direct_cost_dollars", "indirect_cost_dollars",
+    "total_cost_dollars", "revenue_dollars", "net_dollars", "display_name", "acres",
+    "yield_quantity", "yield_unit", "action", "notes",
+]
+
+
+def build_master_lot_schedule(conn: sqlite3.Connection) -> int:
+    conn.execute("DROP TABLE IF EXISTS master_lot_schedule")
     conn.execute(
-        """
-        CREATE TABLE gl_lot_master (
-            lot                    TEXT,
-            display_name           TEXT,
-            target_adg             REAL,
-            market_dollars_per_cwt REAL,
-            target_out_date        TEXT,
-            budget_cost_per_head   REAL,
-            use_for_benchmark      TEXT,
-            notes                  TEXT
+        f"""
+        CREATE TABLE master_lot_schedule (
+            {", ".join(f"{c} TEXT" if c not in _MASTER_LOT_SCHEDULE_NUMERIC else f"{c} REAL" for c in MASTER_LOT_SCHEDULE_COLUMNS)},
+            PRIMARY KEY (lot)
         )
         """
     )
-    wb = openpyxl.load_workbook(LOT_MASTER_XLSX, data_only=True, read_only=True)
-    ws = wb["Lot Master"]
-    header_row = find_header_row(ws, "Lot")  # verified to be row 4 in the real file
-    rows = list(read_sheet_rows(ws, header_row=header_row))
-    conn.executemany("INSERT INTO gl_lot_master VALUES (?,?,?,?,?,?,?,?)", rows)
-    return len(rows)
-
-
-def build_gl_master_lot_schedule(conn: sqlite3.Connection) -> int:
-    conn.execute("DROP TABLE IF EXISTS gl_master_lot_schedule")
-    conn.execute(
-        """
-        CREATE TABLE gl_master_lot_schedule (
-            lot            TEXT,
-            profit_center  TEXT,
-            feed_type      TEXT,
-            location_type  TEXT,
-            state          TEXT,
-            head_on_feed   INTEGER,
-            adg            REAL,
-            interest       REAL,
-            death_loss     REAL,
-            slide          REAL,
-            premium        REAL,
-            status         TEXT,
-            latest_gl_date TEXT,
-            action         TEXT
-        )
-        """
-    )
-    wb = openpyxl.load_workbook(MASTER_LOT_SCHEDULE_XLSX, data_only=True, read_only=True)
-    ws = wb["Sheet1"]
-    header_row = find_header_row(ws, "Lot")  # verified to be row 1 in the real file
-    rows = list(read_sheet_rows(ws, header_row=header_row))
+    rows = fetch_supabase_table("master_lot_schedule")
     conn.executemany(
-        "INSERT INTO gl_master_lot_schedule VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows
+        f"INSERT INTO master_lot_schedule ({', '.join(MASTER_LOT_SCHEDULE_COLUMNS)}) "
+        f"VALUES ({', '.join('?' for _ in MASTER_LOT_SCHEDULE_COLUMNS)})",
+        [tuple(r.get(c) for c in MASTER_LOT_SCHEDULE_COLUMNS) for r in rows],
     )
     return len(rows)
 
 
+def build_master_crop_schedule(conn: sqlite3.Connection) -> int:
+    conn.execute("DROP TABLE IF EXISTS master_crop_schedule")
+    conn.execute(
+        f"""
+        CREATE TABLE master_crop_schedule (
+            {", ".join(f"{c} TEXT" if c not in _MASTER_CROP_SCHEDULE_NUMERIC else f"{c} REAL" for c in MASTER_CROP_SCHEDULE_COLUMNS)},
+            PRIMARY KEY (crop_lot)
+        )
+        """
+    )
+    rows = fetch_supabase_table("master_crop_schedule")
+    conn.executemany(
+        f"INSERT INTO master_crop_schedule ({', '.join(MASTER_CROP_SCHEDULE_COLUMNS)}) "
+        f"VALUES ({', '.join('?' for _ in MASTER_CROP_SCHEDULE_COLUMNS)})",
+        [tuple(r.get(c) for c in MASTER_CROP_SCHEDULE_COLUMNS) for r in rows],
+    )
+    return len(rows)
+
+
+_MASTER_LOT_SCHEDULE_NUMERIC = {
+    "production_year", "head_in", "head_sold", "head_dead", "head_transferred_out",
+    "head_on_hand", "head_days", "avg_dof", "lbs_in", "avg_wt_in", "cost_in_dollars",
+    "cost_in_dollars_per_head", "head_in_app", "head_current_app",
+    "avg_weight_in_app", "projected_current_weight_app", "adg_used",
+    "days_since_anchor", "target_adg", "market_dollars_per_cwt",
+    "budget_cost_per_head", "interest", "death_loss", "slide", "premium",
+}
+_MASTER_CROP_SCHEDULE_NUMERIC = {
+    "production_year", "direct_cost_dollars", "indirect_cost_dollars",
+    "total_cost_dollars", "revenue_dollars", "net_dollars", "acres", "yield_quantity",
+}
+
+
 # ---------------------------------------------------------------------------
-# Part 2: app-native tables, copied verbatim from the Supabase snapshot
+# Part 3: app-native tables, copied verbatim from the (separate) Supabase
+# snapshot behind John's field app
 # ---------------------------------------------------------------------------
+
+RANCH_SQLITE = Path(
+    r"C:\Users\UserTwo\Box\Working\Reagan Ranch\Supabase Connection\data\ranch.sqlite"
+)
+
+# The exact list of Supabase app tables to copy verbatim (same table name,
+# same columns) into dev.sqlite. This is a small subset of the ~120 tables
+# in the full Supabase snapshot - only the ones this dashboard needs.
+APP_NATIVE_TABLES = [
+    "lots",
+    "lot_status",
+    "invoices",
+    "sales",
+    "lot_events",
+    "lot_daily_head",
+    "lot_weight_anchor",
+    "lot_realized_adg",
+    "market_quotes",
+    "positions",
+    "position_lot_links",
+    "hedge_coverage_by_month",
+    "lot_budgets",
+    "delivery_receipts",
+    "shipments",
+]
+
 
 def build_app_native_tables(conn: sqlite3.Connection) -> dict[str, int]:
     """Attach the Supabase snapshot sqlite file and copy the wanted tables
     over using their own real CREATE TABLE statements (introspected from
     sqlite_master, not assumed), so column names/types are exactly as they
-    exist in the source - a future Supabase sync can map onto these 1:1.
+    exist in the source.
     """
     conn.execute("ATTACH DATABASE ? AS src", (str(RANCH_SQLITE),))
     counts: dict[str, int] = {}
@@ -472,8 +512,15 @@ def build_app_native_tables(conn: sqlite3.Connection) -> dict[str, int]:
 
 
 # ---------------------------------------------------------------------------
-# Part 3: crosswalk + app-cohort attribute rollup
+# Part 4: crosswalk
 # ---------------------------------------------------------------------------
+
+HANDOFF_ETL_DIR = Path(
+    r"C:\Users\UserTwo\Box\Working\Reagan Ranch"
+    r"\2026-09-11 JFR Position Desk Data Layer - Handoff\etl"
+)
+CROSSWALK_CSV = HANDOFF_ETL_DIR / "crosswalk_seed.csv"
+
 
 def build_lot_crosswalk(conn: sqlite3.Connection) -> int:
     conn.execute("DROP TABLE IF EXISTS lot_crosswalk")
@@ -508,74 +555,6 @@ def build_lot_crosswalk(conn: sqlite3.Connection) -> int:
     return len(rows)
 
 
-def build_lot_attrs_app_cohort(conn: sqlite3.Connection) -> int | None:
-    """Import App_LotAttrs.csv as-is (grain = one row per app cohort/sub-lot).
-    Per the task brief, if this file is missing we skip the table entirely
-    rather than inventing data - but it DOES exist in this handoff, so we
-    import it.
-    """
-    if not LOT_ATTRS_CSV.exists():
-        return None
-
-    conn.execute("DROP TABLE IF EXISTS lot_attrs_app_cohort")
-    conn.execute(
-        """
-        CREATE TABLE lot_attrs_app_cohort (
-            lot                      TEXT,
-            app_lot                  TEXT,
-            arrival_date             TEXT,
-            weighted_arrival_date    TEXT,
-            head_in                  INTEGER,
-            head_current             INTEGER,
-            head_pending_invoice     INTEGER,
-            avg_weight_in            REAL,
-            projected_current_weight REAL,
-            adg_used                 REAL,
-            adg_source               TEXT,
-            anchor_type              TEXT,
-            anchor_date              TEXT,
-            days_since_anchor        REAL,
-            weight_stale_over_60d    TEXT,
-            days_on_feed             REAL,
-            is_feed_pen              TEXT,
-            source_file              TEXT,
-            crosswalk_flag           TEXT
-        )
-        """
-    )
-    with open(LOT_ATTRS_CSV, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        rows = [
-            (
-                csv_value(r["Lot"]),
-                csv_value(r["App Lot"]),
-                csv_value(r["Arrival Date"]),
-                csv_value(r["Weighted Arrival Date"]),
-                csv_number(r["Head In"]),
-                csv_number(r["Head Current"]),
-                csv_number(r["Head Pending Invoice"]),
-                csv_number(r["Avg Weight In"]),
-                csv_number(r["Projected Current Weight"]),
-                csv_number(r["ADG Used"]),
-                csv_value(r["ADG Source"]),
-                csv_value(r["Anchor Type"]),
-                csv_value(r["Anchor Date"]),
-                csv_number(r["Days Since Anchor"]),
-                csv_value(r["Weight Stale >60d"]),
-                csv_number(r["Days On Feed"]),
-                csv_value(r["Is Feed Pen"]),
-                csv_value(r["Source File"]),
-                csv_value(r["Crosswalk Flag"]),
-            )
-            for r in reader
-        ]
-    conn.executemany(
-        "INSERT INTO lot_attrs_app_cohort VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        rows,
-    )
-    return len(rows)
-
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -592,26 +571,22 @@ def main() -> None:
     print(f"Reading GL workbook: {unit_econ_xlsx.name}")
     wb = openpyxl.load_workbook(unit_econ_xlsx, data_only=True, read_only=True)
     counts["gl_transactions"] = build_gl_transactions(conn, wb)
-    counts["gl_lot_summary"] = build_gl_lot_summary(conn, wb)
     counts["gl_head_days"] = build_gl_head_days(conn, wb)
     counts["gl_head_movements"] = build_gl_head_movements(conn, wb)
     wb.close()
 
-    print("Reading GL reference workbooks (Account Map / Lot Master / Master Lot Schedule)")
+    print("Reading GL reference workbook (Account Map)")
     counts["gl_account_map"] = build_gl_account_map(conn)
-    counts["gl_lot_master"] = build_gl_lot_master(conn)
-    counts["gl_master_lot_schedule"] = build_gl_master_lot_schedule(conn)
+
+    print(f"Reading master_lot_schedule / master_crop_schedule from Supabase ({SUPABASE_URL})")
+    counts["master_lot_schedule"] = build_master_lot_schedule(conn)
+    counts["master_crop_schedule"] = build_master_crop_schedule(conn)
 
     print(f"Copying app-native tables from {RANCH_SQLITE.name}")
     counts.update(build_app_native_tables(conn))
 
-    print("Reading crosswalk + app-cohort attribute CSVs")
+    print("Reading crosswalk CSV")
     counts["lot_crosswalk"] = build_lot_crosswalk(conn)
-    lot_attrs_count = build_lot_attrs_app_cohort(conn)
-    if lot_attrs_count is None:
-        print("  NOTE: App_LotAttrs.csv not found - skipping lot_attrs_app_cohort table.")
-    else:
-        counts["lot_attrs_app_cohort"] = lot_attrs_count
 
     conn.commit()
 

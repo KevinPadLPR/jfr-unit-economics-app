@@ -26,16 +26,29 @@ export interface GlLotSummaryRow {
   market_dollars_per_cwt: number | null;
   target_out_date: string | null;
   use_for_benchmark: string | null;
+  // Columns that used to live on gl_lot_master / gl_master_lot_schedule /
+  // lot_attrs_app_cohort, now on this one row (docs/PROMPT - Master Schedule
+  // Unification.md §1) — folded in here so callers like scorecard.ts,
+  // lot-sheet.ts and the Lots page don't need a second query.
+  feed_type: string | null;
+  location_type: string | null;
+  state: string | null;
+  interest: number | null;
+  death_loss: number | null;
+  slide: number | null;
+  premium: number | null;
+  action: string | null;
+  notes: string | null;
 }
 
 export function getGlLotSummary(lot: string): GlLotSummaryRow | undefined {
   const db = getDb();
-  return db.prepare(`SELECT * FROM gl_lot_summary WHERE lot = ?`).get(lot) as GlLotSummaryRow | undefined;
+  return db.prepare(`SELECT * FROM master_lot_schedule WHERE lot = ?`).get(lot) as GlLotSummaryRow | undefined;
 }
 
 export function listGlLots(): GlLotSummaryRow[] {
   const db = getDb();
-  return db.prepare(`SELECT * FROM gl_lot_summary ORDER BY status, lot`).all() as unknown as GlLotSummaryRow[];
+  return db.prepare(`SELECT * FROM master_lot_schedule ORDER BY status, lot`).all() as unknown as GlLotSummaryRow[];
 }
 
 export interface CostOfGainResult {

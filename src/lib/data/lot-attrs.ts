@@ -6,80 +6,64 @@ export interface LotAttrsRollup {
   adgUsed: number;
   adgProvenance: Provenance;
   adgSourceDetail: string;
-  weightedArrivalDate: string | null;
   projectedCurrentWeight: number | null;
   anyWeightStale: boolean;
-  cohortCount: number;
 }
 
 /**
- * App-native cattle data is cohort-grain (sub-lots like "37X-1") while the GL
- * lot is coarser ("37-X"). lot_attrs_app_cohort.lot already carries the GL
- * lot for each cohort row (Ryan's ETL applied the crosswalk upstream), so we
- * just group by it here — head-weighted average for ADG/weight, per the same
- * convention used in Template/builder/add_analysis_sheets.py's tbl_LotAttrs.
- * Falls back to the flat, assumed Target ADG when a lot has no app rows at
+ * `master_lot_schedule` is GL-lot-grain already — the Excel notebook now does
+ * the head-weighted rollup across app cohorts (sub-lots like "37X-1") itself,
+ * before syncing, so this is a single-row read, not a rollup computed here.
+ * See docs/PROMPT - Master Schedule Unification.md §2 — this used to query
+ * cohort-grain `lot_attrs_app_cohort` and average in JS; that table is
+ * retired, replaced by the `has_app_data`/`adg_used`/`adg_source` columns
+ * already on the one `master_lot_schedule` row for this lot.
+ * Falls back to the flat, assumed Target ADG when a lot has no app data at
  * all (~5 of 14 real lots / 28% of head, permanently — see
  * Context - Dashboard Web App Handoff.md §5b).
  */
 export function getLotAttrsRollup(glLot: string, fallbackTargetAdg: number): LotAttrsRollup {
   const db = getDb();
-  const rows = db
+  const row = db
     .prepare(
-      `SELECT app_lot, head_current, adg_used, adg_source, weighted_arrival_date,
-              projected_current_weight, weight_stale_over_60d
-       FROM lot_attrs_app_cohort
+      `SELECT has_app_data, adg_used, adg_source, projected_current_weight_app, weight_stale_over_60d
+       FROM master_lot_schedule
        WHERE lot = ?`
     )
-    .all(glLot) as {
-    app_lot: string;
-    head_current: number | null;
+    .get(glLot) as {
+    has_app_data: string | null;
     adg_used: number | null;
     adg_source: string | null;
-    weighted_arrival_date: string | null;
-    projected_current_weight: number | null;
+    projected_current_weight_app: number | null;
     weight_stale_over_60d: string | null;
-  }[];
+  } | undefined;
 
-  if (rows.length === 0) {
+  if (!row || (row.has_app_data ?? "").toLowerCase() !== "yes") {
     return {
       hasAppData: false,
       adgUsed: fallbackTargetAdg,
       adgProvenance: "assumed",
-      adgSourceDetail: "No app data for this lot — flat Target ADG from Lot Master",
-      weightedArrivalDate: null,
+      adgSourceDetail: "No app data for this lot — flat Target ADG from Master Lot Schedule",
       projectedCurrentWeight: null,
       anyWeightStale: false,
-      cohortCount: 0,
     };
   }
 
-  const weight = (r: (typeof rows)[number]) => (r.head_current && r.head_current > 0 ? r.head_current : 1);
-  const totalWeight = rows.reduce((s, r) => s + weight(r), 0);
-
-  const adgUsed = rows.reduce((s, r) => s + (r.adg_used ?? fallbackTargetAdg) * weight(r), 0) / totalWeight;
-  const projectedCurrentWeight =
-    rows.reduce((s, r) => s + (r.projected_current_weight ?? 0) * weight(r), 0) / totalWeight;
-
-  const allRealized = rows.every((r) => (r.adg_source ?? "").startsWith("realized"));
-  const anyWeightStale = rows.some((r) => r.weight_stale_over_60d === "YES");
-  const latestArrival = rows
-    .map((r) => r.weighted_arrival_date)
-    .filter((d): d is string => !!d)
-    .sort()
-    .pop();
+  const source = row.adg_source ?? "assumed";
+  const detailBySource: Record<string, string> = {
+    realized: "Realized ADG from app cohort(s), head-weighted",
+    realized_thin: "Realized ADG from app cohort(s), head-weighted (thin sample)",
+    mixed: "Mixed realized/assumed ADG across app cohort(s), head-weighted",
+    assumed: "App data present but not yet realized — assumed ADG",
+  };
 
   return {
     hasAppData: true,
-    adgUsed,
-    adgProvenance: allRealized ? "modeled" : "assumed",
-    adgSourceDetail: allRealized
-      ? `Realized ADG from ${rows.length} app cohort(s), head-weighted`
-      : `Mixed realized/assumed ADG across ${rows.length} app cohort(s)`,
-    weightedArrivalDate: latestArrival ?? null,
-    projectedCurrentWeight,
-    anyWeightStale,
-    cohortCount: rows.length,
+    adgUsed: row.adg_used ?? fallbackTargetAdg,
+    adgProvenance: source === "assumed" ? "assumed" : "modeled",
+    adgSourceDetail: detailBySource[source] ?? `ADG source: ${source}`,
+    projectedCurrentWeight: row.projected_current_weight_app,
+    anyWeightStale: row.weight_stale_over_60d === "YES",
   };
 }
 

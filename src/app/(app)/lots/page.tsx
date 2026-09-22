@@ -1,34 +1,16 @@
 import Link from "next/link";
 import { listGlLots } from "@/lib/data/cost-of-gain";
-import { getDb } from "@/lib/db";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { formatNumber, formatDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-interface ScheduleRow {
-  lot: string;
-  feed_type: string | null;
-  location_type: string | null;
-  state: string | null;
-  interest: number | null;
-  death_loss: number | null;
-  slide: number | null;
-  premium: number | null;
-  latest_gl_date: string | null;
-  action: string | null;
-}
-
 export default async function LotsPage() {
+  // master_lot_schedule already carries feed_type/location_type/state/
+  // interest/death_loss/slide/premium/action on the same row as everything
+  // else listGlLots() returns — no second query (docs/PROMPT - Master
+  // Schedule Unification.md §3). `latest_gl_date` is now `last_activity`.
   const lots = listGlLots();
-  const db = getDb();
-  const schedule = db
-    .prepare(
-      `SELECT lot, feed_type, location_type, state, interest, death_loss, slide, premium, latest_gl_date, action
-       FROM gl_master_lot_schedule`
-    )
-    .all() as unknown as ScheduleRow[];
-  const scheduleByLot = new Map(schedule.map((s) => [s.lot, s]));
 
   return (
     <div className="flex flex-col gap-6">
@@ -51,31 +33,28 @@ export default async function LotsPage() {
               <TableHead>State</TableHead>
               <TableHead className="text-right">Interest</TableHead>
               <TableHead className="text-right">Death loss</TableHead>
-              <TableHead>Latest GL date</TableHead>
+              <TableHead>Last activity</TableHead>
               <TableHead>Action</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {lots.map((l) => {
-              const s = scheduleByLot.get(l.lot);
-              return (
-                <TableRow key={l.lot}>
-                  <TableCell className="font-medium">
-                    <Link href={`/lots/${encodeURIComponent(l.lot)}`} className="hover:underline">
-                      {l.lot}
-                    </Link>
-                  </TableCell>
-                  <TableCell>{l.status ?? "—"}</TableCell>
-                  <TableCell>{s?.feed_type ?? "—"}</TableCell>
-                  <TableCell>{s?.location_type ?? "—"}</TableCell>
-                  <TableCell>{s?.state ?? "—"}</TableCell>
-                  <TableCell className="text-right">{s?.interest != null ? `${formatNumber(s.interest)}%` : "—"}</TableCell>
-                  <TableCell className="text-right">{s?.death_loss != null ? `${formatNumber(s.death_loss)}%` : "—"}</TableCell>
-                  <TableCell>{formatDate(s?.latest_gl_date)}</TableCell>
-                  <TableCell className="text-muted-foreground">{s?.action ?? "—"}</TableCell>
-                </TableRow>
-              );
-            })}
+            {lots.map((l) => (
+              <TableRow key={l.lot}>
+                <TableCell className="font-medium">
+                  <Link href={`/lots/${encodeURIComponent(l.lot)}`} className="hover:underline">
+                    {l.lot}
+                  </Link>
+                </TableCell>
+                <TableCell>{l.status ?? "—"}</TableCell>
+                <TableCell>{l.feed_type ?? "—"}</TableCell>
+                <TableCell>{l.location_type ?? "—"}</TableCell>
+                <TableCell>{l.state ?? "—"}</TableCell>
+                <TableCell className="text-right">{l.interest != null ? `${formatNumber(l.interest)}%` : "—"}</TableCell>
+                <TableCell className="text-right">{l.death_loss != null ? `${formatNumber(l.death_loss)}%` : "—"}</TableCell>
+                <TableCell>{formatDate(l.last_activity)}</TableCell>
+                <TableCell className="text-muted-foreground">{l.action ?? "—"}</TableCell>
+              </TableRow>
+            ))}
           </TableBody>
         </Table>
       </div>

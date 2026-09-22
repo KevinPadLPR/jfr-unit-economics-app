@@ -58,11 +58,9 @@ export function getLotSheet(lot: string): LotSheet | undefined {
   const summary = getGlLotSummary(lot);
   if (!summary) return undefined;
 
-  const db = getDb();
-  const schedule = db
-    .prepare(`SELECT feed_type, location_type, state FROM gl_master_lot_schedule WHERE lot = ?`)
-    .get(lot) as { feed_type: string | null; location_type: string | null; state: string | null } | undefined;
-
+  // feed_type/location_type/state now live on the same master_lot_schedule
+  // row as `summary` — no second query (docs/PROMPT - Master Schedule
+  // Unification.md §3).
   const movements = getHeadMovements(lot);
   const cattleIn = movements.filter((m) => ["Purchase", "Transfer In"].includes(m.movement_type));
   const cattleOut = movements.filter((m) => ["Sold", "Transfer Out"].includes(m.movement_type));
@@ -95,7 +93,7 @@ export function getLotSheet(lot: string): LotSheet | undefined {
       ? ((attrs.projectedCurrentWeight ?? summary.avg_wt_in ?? 0) / 100) * settle.settle * (summary.head_on_hand ?? 0)
       : null;
 
-  // gl_lot_summary.cost_in_dollars is already the full LTD cost mapped to this
+  // master_lot_schedule.cost_in_dollars is already the full LTD cost mapped to this
   // lot (Purchased Cattle + Direct + Indirect, WIP+COGS twins unioned) — the
   // expense breakdown above is Direct/Indirect detail for display, not a
   // second cost to add on top.
@@ -105,9 +103,9 @@ export function getLotSheet(lot: string): LotSheet | undefined {
   return {
     lot,
     summary,
-    scheduleFeedType: schedule?.feed_type ?? null,
-    scheduleLocationType: schedule?.location_type ?? null,
-    scheduleState: schedule?.state ?? null,
+    scheduleFeedType: summary.feed_type,
+    scheduleLocationType: summary.location_type,
+    scheduleState: summary.state,
     cattleIn,
     cattleOut,
     deads,

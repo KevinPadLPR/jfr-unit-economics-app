@@ -17,8 +17,9 @@ export default auth((req) => {
     return NextResponse.redirect(new URL(role === "rancher" ? "/rancher" : "/", req.nextUrl));
   }
 
-  // Rancher data-entry views/data are a later phase — for now, fence ranchers
-  // out of the admin dashboards rather than showing them empty pages.
+  // Ranchers get a lightweight read-only view (their open lots, no $ or
+  // hedge data) rather than the full admin dashboard — there's no data-entry
+  // path here at all; field data comes from John's app, not this dashboard.
   if (isLoggedIn && role === "rancher" && !pathname.startsWith("/rancher")) {
     return NextResponse.redirect(new URL("/rancher", req.nextUrl));
   }

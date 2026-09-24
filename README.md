@@ -31,12 +31,16 @@ before this ever goes near a real client):
 | Role | Email | Password |
 |---|---|---|
 | Admin (full dashboard) | `admin@jfrranch.com` | `JFRAdmin2026!` |
-| Rancher (data entry — placeholder for now) | `rancher@jfrranch.com` | `JFRRancher2026!` |
+| Rancher (read-only) | `rancher@jfrranch.com` | `JFRRancher2026!` |
 
 Admins see the full dashboard (Overview, Cost of Gain, Lot Scorecard, Market Position,
-Master Lot Schedule). Ranchers are routed to `/rancher`, a placeholder — field data entry
-(weights, deaths, moves, health events) is an explicitly separate next phase, not built
-here yet (see the handoff doc §3 for what ranchers actually asked for).
+Master Lot Schedule). Ranchers are routed to `/rancher`, a lightweight read-only view of
+their open lots (feed type, location, head on hand, avg DOF) — no $ cost/revenue and no
+market/hedge position data, both of which stay admin-only. This is deliberately **not** a
+data-entry screen: field data (weights, deaths, moves, health events) is captured in
+John's own field app, not here, so there's no legitimate write path for a rancher account
+to have in this dashboard at all (see the handoff doc §3 for what ranchers actually asked
+for, and the 2026-09-24 conversation note that settled this scope).
 
 ## Data: SQLite now, Supabase later
 
@@ -72,7 +76,8 @@ up; nothing else should need to change.
 
 ## What's deliberately not built yet
 
-- Rancher field data entry (next phase, per the client ask).
+- Rancher field data entry — **not planned**, not just "later." Field data is captured in
+  John's own app; this dashboard has no legitimate write path and isn't meant to grow one.
 - A real contract-month/own-basis table for Market Position — light calves are currently
   marked against the standard CME feeder contract, which is a known simplification (see
   the caveat text on that page).

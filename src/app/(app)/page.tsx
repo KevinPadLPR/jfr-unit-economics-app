@@ -1,13 +1,16 @@
 import { getOverviewMetrics } from "@/lib/data/overview";
 import { getMarketPosition } from "@/lib/data/market-position";
+import { getRanchMonthlyCostSeries } from "@/lib/data/gl";
 import { StatTile } from "@/components/stat-tile";
 import { UnrealizedByLotChart } from "./unrealized-by-lot-chart";
+import { MonthlySpendChart } from "./monthly-spend-chart";
 
 export const dynamic = "force-dynamic";
 
 export default async function OverviewPage() {
   const { computed, unavailable, caveats } = getOverviewMetrics();
   const marketPosition = getMarketPosition();
+  const monthlySpend = getRanchMonthlyCostSeries();
 
   return (
     <div className="flex flex-col gap-6">
@@ -33,6 +36,8 @@ export default async function OverviewPage() {
           been booked yet, not a real $0 cost. Feed cost for those lots is understated until it is.
         </p>
       )}
+
+      <MonthlySpendChart data={monthlySpend} />
 
       <UnrealizedByLotChart
         data={marketPosition.map((r) => ({

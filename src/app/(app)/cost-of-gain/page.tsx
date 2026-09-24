@@ -5,6 +5,7 @@ import { ReportUnavailableNotice } from "@/components/report-unavailable-notice"
 import { LotPicker } from "./lot-picker";
 import { CostBreakdownChart } from "./cost-breakdown-chart";
 import { WeeklyCostChart } from "./weekly-cost-chart";
+import { AdgComparisonChart } from "./adg-comparison-chart";
 import { formatPerLb, formatMoney, formatNumber } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +21,7 @@ export default async function CostOfGainPage({
 
   const cog = lot ? getCostOfGain(lot) : undefined;
   const weekly = lot ? getWeeklyCostSeries(lot) : [];
+  const targetAdg = lots.find((l) => l.lot === lot)?.target_adg ?? null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -74,7 +76,10 @@ export default async function CostOfGainPage({
             <StatTile label="$ / head-day (operating)" value={formatMoney(cog.costPerHeadDayOperating, { cents: true })} provenance="modeled" />
           </div>
 
-          <CostBreakdownChart data={cog.costBreakdown} />
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <CostBreakdownChart data={cog.costBreakdown} />
+            <AdgComparisonChart targetAdg={targetAdg} actualAdg={cog.adgUsed} />
+          </div>
           <WeeklyCostChart data={weekly} />
         </>
       )}

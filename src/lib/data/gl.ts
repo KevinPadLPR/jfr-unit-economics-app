@@ -99,3 +99,25 @@ export function getMonthlyHeadSeries(lot: string): MonthlyHeadPoint[] {
     )
     .all(lot) as unknown as MonthlyHeadPoint[];
 }
+
+export interface MonthlyRanchCostPoint {
+  month_end: string;
+  direct: number;
+  indirect: number;
+}
+
+/** Direct + Indirect $ by month, across every lot — the whole ranch's spend, not one lot's. */
+export function getRanchMonthlyCostSeries(): MonthlyRanchCostPoint[] {
+  const db = getDb();
+  return db
+    .prepare(
+      `SELECT month_end,
+              ROUND(SUM(CASE WHEN report_section = 'Direct' THEN report_amount ELSE 0 END), 2) AS direct,
+              ROUND(SUM(CASE WHEN report_section = 'Indirect' THEN report_amount ELSE 0 END), 2) AS indirect
+       FROM gl_transactions
+       WHERE month_end IS NOT NULL
+       GROUP BY month_end
+       ORDER BY month_end ASC`
+    )
+    .all() as unknown as MonthlyRanchCostPoint[];
+}

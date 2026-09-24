@@ -20,10 +20,7 @@ export function UnrealizedByLotChart({ data }: { data: Row[] }) {
     <Card>
       <CardHeader>
         <CardTitle className="text-base">Unrealized position by open lot</CardTitle>
-        <CardDescription>
-          Marked value minus cost basis, at the latest feeder-cattle CME settle. Lots under 600 lb are marked
-          against a contract sized for much heavier cattle — see the note below the chart.
-        </CardDescription>
+        <CardDescription>What each open lot would gain or lose if sold today, at the latest market price.</CardDescription>
       </CardHeader>
       <div className="h-72 px-2 pb-4">
         <ResponsiveContainer width="100%" height="100%">
@@ -51,9 +48,8 @@ export function UnrealizedByLotChart({ data }: { data: Row[] }) {
       </div>
       {data.some((r) => r.lightCalfCaveat) && (
         <p className="px-4 pb-4 text-xs text-muted-foreground">
-          Lots marked with a lighter bar tooltip note are under 600 lb, marked against the CME feeder contract
-          (sized for 700-800 lb cattle) — this can show large artificial unrealized losses. A real own-basis table
-          for light calves doesn&apos;t exist yet.
+          Lots under 600 lb are marked at a price meant for heavier cattle, which can show an overly large loss —
+          look at those numbers as a rough estimate, not a firm one.
         </p>
       )}
     </Card>

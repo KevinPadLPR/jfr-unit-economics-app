@@ -11,9 +11,7 @@ export default async function LotScorecardPage() {
       <div>
         <h1 className="text-2xl font-semibold text-foreground">Lot Scorecard</h1>
         <p className="text-sm text-muted-foreground">
-          Every lot ever seen — open and closed — for benchmarking lot-over-lot and year-over-year. Confidence
-          reflects whether a lot has real app-sourced weight/ADG data or falls back to the flat Lot Master
-          assumption.
+          Every lot, open and closed, side by side so you can compare how each one performed.
         </p>
       </div>
       <ScorecardTable rows={rows} />

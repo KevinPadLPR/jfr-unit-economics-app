@@ -81,3 +81,21 @@ export function getWeeklyCostSeries(lot: string): WeeklyCostPoint[] {
     .all(lot)
     .reverse() as unknown as WeeklyCostPoint[];
 }
+
+export interface MonthlyHeadPoint {
+  month_end: string;
+  head_end: number;
+}
+
+/** Head on hand at month-end, life-to-date — how this lot's count has moved over time. */
+export function getMonthlyHeadSeries(lot: string): MonthlyHeadPoint[] {
+  const db = getDb();
+  return db
+    .prepare(
+      `SELECT month_end, head_end
+       FROM gl_head_days
+       WHERE lot = ? AND month_end IS NOT NULL
+       ORDER BY month_end ASC`
+    )
+    .all(lot) as unknown as MonthlyHeadPoint[];
+}

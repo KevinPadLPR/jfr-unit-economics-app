@@ -1,9 +1,10 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { LayoutDashboard, TrendingUp, ClipboardList, LineChart, ListTree, LogOut } from "lucide-react";
+import { Boxes, LayoutDashboard, TrendingUp, ClipboardList, LineChart, ListTree, LogOut } from "lucide-react";
 import { auth, signOut } from "@/auth";
 
 const NAV = [
+  { href: "/inventory", label: "Inventory", icon: Boxes },
   { href: "/", label: "Overview", icon: LayoutDashboard },
   { href: "/cost-of-gain", label: "Cost of Gain", icon: TrendingUp },
   { href: "/lot-scorecard", label: "Lot Scorecard", icon: ClipboardList },

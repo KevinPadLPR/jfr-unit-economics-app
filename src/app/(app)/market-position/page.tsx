@@ -20,7 +20,7 @@ export default async function MarketPositionPage() {
     <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-2xl font-semibold text-foreground">Market Position</h1>
-        <p className="text-sm text-muted-foreground">Mark-to-market for open lots, at the latest CME feeder-cattle settle.</p>
+        <p className="text-sm text-muted-foreground">What your open lots would be worth if you sold today, at the latest market price.</p>
       </div>
 
       {settle ? (
@@ -88,10 +88,8 @@ export default async function MarketPositionPage() {
       </div>
 
       <p className="text-xs text-muted-foreground">
-        Every mark uses the same latest feeder-cattle settle regardless of each lot&apos;s actual target ship
-        month, and light calves are marked against a contract sized for 700-800 lb cattle — both are known
-        simplifications until a real contract-month and own-basis table are built (see docs/brand-palette.md and
-        the project README for what&apos;s next).
+        Every lot is marked at the same feeder-cattle price, which may not perfectly reflect lighter calves&apos;
+        real market value — that&apos;s what the &ldquo;light-calf mark&rdquo; flag is calling out.
       </p>
     </div>
   );

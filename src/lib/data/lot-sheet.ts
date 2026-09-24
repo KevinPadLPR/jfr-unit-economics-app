@@ -37,9 +37,8 @@ export interface LotSheet {
   scheduleFeedType: string | null;
   scheduleLocationType: string | null;
   scheduleState: string | null;
-  cattleIn: HeadMovementRow[];
-  cattleOut: HeadMovementRow[];
-  deads: HeadMovementRow[];
+  /** Every head movement for this lot, chronological — one compact activity table, not three separate lists. */
+  activity: HeadMovementRow[];
   expenses: {
     direct: ExpenseLine[];
     directTotal: ExpenseLine;
@@ -61,10 +60,7 @@ export function getLotSheet(lot: string): LotSheet | undefined {
   // feed_type/location_type/state now live on the same master_lot_schedule
   // row as `summary` — no second query (docs/PROMPT - Master Schedule
   // Unification.md §3).
-  const movements = getHeadMovements(lot);
-  const cattleIn = movements.filter((m) => ["Purchase", "Transfer In"].includes(m.movement_type));
-  const cattleOut = movements.filter((m) => ["Sold", "Transfer Out"].includes(m.movement_type));
-  const deads = movements.filter((m) => m.movement_type === "Died");
+  const activity = getHeadMovements(lot);
 
   const cog = getCostOfGain(lot);
   const headIn = summary.head_in ?? 0;
@@ -106,9 +102,7 @@ export function getLotSheet(lot: string): LotSheet | undefined {
     scheduleFeedType: summary.feed_type,
     scheduleLocationType: summary.location_type,
     scheduleState: summary.state,
-    cattleIn,
-    cattleOut,
-    deads,
+    activity,
     expenses: { direct, directTotal, general, total },
     revenue,
     markedValueOnHand,

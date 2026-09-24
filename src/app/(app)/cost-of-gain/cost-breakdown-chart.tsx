@@ -17,7 +17,7 @@ export function CostBreakdownChart({ data }: { data: Row[] }) {
     <Card>
       <CardHeader>
         <CardTitle className="text-base">Direct cost breakdown (life-to-date)</CardTitle>
-        <CardDescription>Every Direct GL line for this lot — the source rows behind Operating $ and All-In $.</CardDescription>
+        <CardDescription>Every direct cost line for this lot, biggest first.</CardDescription>
       </CardHeader>
       <div className="h-72 px-2 pb-4">
         <ResponsiveContainer width="100%" height="100%">

@@ -1,12 +1,26 @@
 import { notFound } from "next/navigation";
 import { getLotSheet } from "@/lib/data/lot-sheet";
+import { getLotFlow } from "@/lib/data/lot-flow";
+import { getMonthlyHeadSeries, getWeeklyCostSeries } from "@/lib/data/gl";
 import { StatTile } from "@/components/stat-tile";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell, TableFooter } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { formatMoney, formatNumber, formatDate, formatPct } from "@/lib/format";
+import { LotFlowChart } from "./lot-flow-chart";
+import { MonthlyHeadChart } from "./monthly-head-chart";
+import { WeeklyCostChart } from "../../cost-of-gain/weekly-cost-chart";
 
 export const dynamic = "force-dynamic";
+
+const MOVEMENT_BADGE: Record<string, "good" | "neutral" | "critical" | "warning"> = {
+  Purchase: "good",
+  "Transfer In": "good",
+  Sold: "neutral",
+  "Transfer Out": "neutral",
+  Died: "critical",
+  Adjustment: "warning",
+};
 
 export default async function LotSheetPage({ params }: { params: Promise<{ lot: string }> }) {
   const { lot: lotParam } = await params;
@@ -16,6 +30,9 @@ export default async function LotSheetPage({ params }: { params: Promise<{ lot: 
 
   const { summary } = sheet;
   const deathPct = summary.head_in ? ((summary.head_dead ?? 0) / summary.head_in) * 100 : null;
+  const flow = getLotFlow(lot, summary.head_on_hand ?? 0);
+  const monthlyHead = getMonthlyHeadSeries(lot);
+  const weeklyCost = getWeeklyCostSeries(lot);
 
   return (
     <div className="flex flex-col gap-6">
@@ -32,7 +49,7 @@ export default async function LotSheetPage({ params }: { params: Promise<{ lot: 
 
       {sheet.crosswalk.decisionNeeded && (
         <p className="rounded-md border border-[color-mix(in_srgb,var(--status-warning)_50%,var(--border))] bg-[color-mix(in_srgb,var(--status-warning)_8%,white)] px-3 py-2 text-xs text-[#5c3d00]">
-          This lot&apos;s app-to-GL crosswalk needs a human decision ({sheet.crosswalk.matchType}): {sheet.crosswalk.note}
+          We need to confirm which app record this lot matches before its head/weight numbers can be trusted: {sheet.crosswalk.note}
         </p>
       )}
 
@@ -46,10 +63,13 @@ export default async function LotSheetPage({ params }: { params: Promise<{ lot: 
         <StatTile label="Last Activity" value={formatDate(summary.last_activity)} />
       </div>
 
-      {/* Cattle In / Out */}
+      {/* Cattle flow */}
+      {flow && <LotFlowChart lot={lot} flow={flow} />}
+
+      {/* Monthly + weekly trends */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <MovementCard title="Cattle In" rows={sheet.cattleIn} />
-        <MovementCard title="Cattle Out" rows={sheet.cattleOut} />
+        <MonthlyHeadChart data={monthlyHead} />
+        <WeeklyCostChart data={weeklyCost} />
       </div>
 
       {/* Deads */}
@@ -69,11 +89,54 @@ export default async function LotSheetPage({ params }: { params: Promise<{ lot: 
         </CardContent>
       </Card>
 
+      {/* Activity */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Activity</CardTitle>
+          <CardDescription>Every head movement on this lot, in order.</CardDescription>
+        </CardHeader>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Date</TableHead>
+              <TableHead>Type</TableHead>
+              <TableHead className="text-right">Head</TableHead>
+              <TableHead className="text-right">Weight</TableHead>
+              <TableHead className="text-right">$/Head</TableHead>
+              <TableHead>Notes</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sheet.activity.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={6} className="text-center text-muted-foreground">
+                  No activity recorded
+                </TableCell>
+              </TableRow>
+            )}
+            {sheet.activity.map((m, i) => (
+              <TableRow key={i}>
+                <TableCell>{formatDate(m.date)}</TableCell>
+                <TableCell>
+                  <Badge variant={MOVEMENT_BADGE[m.movement_type] ?? "neutral"}>{m.movement_type}</Badge>
+                </TableCell>
+                <TableCell className="text-right">{formatNumber(m.head)}</TableCell>
+                <TableCell className="text-right">{m.lbs ? `${formatNumber(m.lbs)} lb` : "—"}</TableCell>
+                <TableCell className="text-right">{formatMoney(m.dollars_per_head, { cents: true })}</TableCell>
+                <TableCell className="max-w-xs truncate text-muted-foreground" title={m.notes ?? undefined}>
+                  {m.notes ?? "—"}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Card>
+
       {/* Expenses */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Expenses</CardTitle>
-          <CardDescription>Life-to-date, from the GL.</CardDescription>
+          <CardDescription>Every dollar spent on this lot since day one.</CardDescription>
         </CardHeader>
         <Table>
           <TableHeader>
@@ -134,48 +197,5 @@ export default async function LotSheetPage({ params }: { params: Promise<{ lot: 
         />
       </div>
     </div>
-  );
-}
-
-function MovementCard({
-  title,
-  rows,
-}: {
-  title: string;
-  rows: { date: string; head: number; lbs: number | null; amount: number | null; dollars_per_head: number | null }[];
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">{title}</CardTitle>
-      </CardHeader>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Date</TableHead>
-            <TableHead className="text-right">Head</TableHead>
-            <TableHead className="text-right">Total Wt</TableHead>
-            <TableHead className="text-right">$/Head</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.length === 0 && (
-            <TableRow>
-              <TableCell colSpan={4} className="text-center text-muted-foreground">
-                No transactions
-              </TableCell>
-            </TableRow>
-          )}
-          {rows.map((r, i) => (
-            <TableRow key={i}>
-              <TableCell>{formatDate(r.date)}</TableCell>
-              <TableCell className="text-right">{formatNumber(r.head)}</TableCell>
-              <TableCell className="text-right">{r.lbs ? `${formatNumber(r.lbs)} lb` : "—"}</TableCell>
-              <TableCell className="text-right">{formatMoney(r.dollars_per_head, { cents: true })}</TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </Card>
   );
 }

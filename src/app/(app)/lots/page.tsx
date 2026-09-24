@@ -17,8 +17,7 @@ export default async function LotsPage() {
       <div>
         <h1 className="text-2xl font-semibold text-foreground">Master Lot Schedule</h1>
         <p className="text-sm text-muted-foreground">
-          Every lot JFR has ever run, with the hand-maintained attributes (feed type, location, interest, death
-          loss %, slide, premium) that don&apos;t live in the GL.
+          Every lot JFR has run, with the details we track by hand: feed type, location, interest, and death loss.
         </p>
       </div>
 

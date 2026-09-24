@@ -27,7 +27,7 @@ export default async function CostOfGainPage({
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Cost of Gain</h1>
           <p className="text-sm text-muted-foreground">
-            Life-to-date, by lot. &ldquo;Total dollars first, divide at the end&rdquo; — never averaged ratios.
+            What it&apos;s cost to put a pound of gain on this lot, from day one.
           </p>
         </div>
         <LotPicker lots={lots.map((l) => ({ lot: l.lot, status: l.status }))} />
@@ -38,7 +38,7 @@ export default async function CostOfGainPage({
       ) : (
         <>
           {!cog.grazingSummerNativeBooked && (
-            <ReportUnavailableNotice detail={`Grazing - Summer Native is booked at $0 for lot ${cog.lot} — feed cost of gain is understated until this is posted.`} />
+            <ReportUnavailableNotice detail={`Summer grazing costs for lot ${cog.lot} haven't been booked yet — feed cost of gain is understated until they are.`} />
           )}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

@@ -43,7 +43,7 @@ export function getLotAttrsRollup(glLot: string, fallbackTargetAdg: number): Lot
       hasAppData: false,
       adgUsed: fallbackTargetAdg,
       adgProvenance: "assumed",
-      adgSourceDetail: "No app data for this lot — flat Target ADG from Master Lot Schedule",
+      adgSourceDetail: "Using our target daily gain for this lot — no field weigh-ins yet",
       projectedCurrentWeight: null,
       anyWeightStale: false,
     };
@@ -51,10 +51,10 @@ export function getLotAttrsRollup(glLot: string, fallbackTargetAdg: number): Lot
 
   const source = row.adg_source ?? "assumed";
   const detailBySource: Record<string, string> = {
-    realized: "Realized ADG from app cohort(s), head-weighted",
-    realized_thin: "Realized ADG from app cohort(s), head-weighted (thin sample)",
-    mixed: "Mixed realized/assumed ADG across app cohort(s), head-weighted",
-    assumed: "App data present but not yet realized — assumed ADG",
+    realized: "Based on actual field weigh-ins",
+    realized_thin: "Based on actual field weigh-ins (small sample so far)",
+    mixed: "Mix of actual weigh-ins and our target assumption",
+    assumed: "Using our target daily gain for now — no weigh-ins yet",
   };
 
   return {

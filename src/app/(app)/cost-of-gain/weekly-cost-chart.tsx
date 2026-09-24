@@ -18,9 +18,7 @@ export function WeeklyCostChart({ data }: { data: Row[] }) {
     <Card>
       <CardHeader>
         <CardTitle className="text-base">Weekly cost, last 13 weeks</CardTitle>
-        <CardDescription>
-          Dollars only, never $/lb — Indirect posts month-end only, so a weekly $/lb would show a false spike.
-        </CardDescription>
+        <CardDescription>Direct and overhead spend on this lot, week by week.</CardDescription>
       </CardHeader>
       <div className="h-64 px-2 pb-4">
         <ResponsiveContainer width="100%" height="100%">

@@ -14,8 +14,7 @@ export default async function OverviewPage() {
       <div>
         <h1 className="text-2xl font-semibold text-foreground">Overview</h1>
         <p className="text-sm text-muted-foreground">
-          The front-page metrics from the Position Desk spec — capped at twelve, every number labeled with how it
-          was derived.
+          Your ranch at a glance — cattle owned, what they cost, and where you stand against the market.
         </p>
       </div>
 
@@ -30,9 +29,8 @@ export default async function OverviewPage() {
 
       {caveats.unbookedSummerGrazingLots > 0 && (
         <p className="text-xs text-muted-foreground">
-          Note: {caveats.unbookedSummerGrazingLots} open 2026 lot(s) show $0 booked for &ldquo;Grazing - Summer
-          Native&rdquo; — a known accounting gap, not zero real cost. Feed cost of gain for those lots is
-          understated until Brenda books it.
+          Note: {caveats.unbookedSummerGrazingLots} open 2026 lot(s) show $0 for summer grazing — that&apos;s not
+          been booked yet, not a real $0 cost. Feed cost for those lots is understated until it is.
         </p>
       )}
 

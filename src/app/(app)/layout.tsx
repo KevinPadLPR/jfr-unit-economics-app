@@ -1,19 +1,27 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { Boxes, LayoutDashboard, TrendingUp, ClipboardList, LineChart, ListTree, LogOut } from "lucide-react";
+import { Boxes, LayoutDashboard, TrendingUp, ClipboardList, LineChart, ListTree, FileText, LogOut } from "lucide-react";
 import { auth, signOut } from "@/auth";
-
-const NAV = [
-  { href: "/inventory", label: "Inventory", icon: Boxes },
-  { href: "/", label: "Overview", icon: LayoutDashboard },
-  { href: "/cost-of-gain", label: "Cost of Gain", icon: TrendingUp },
-  { href: "/lot-scorecard", label: "Lot Scorecard", icon: ClipboardList },
-  { href: "/market-position", label: "Market Position", icon: LineChart },
-  { href: "/lots", label: "Master Lot Schedule", icon: ListTree },
-];
+import { listGlLots } from "@/lib/data/cost-of-gain";
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const session = await auth();
+
+  // "Lot Detail" has no page of its own (it's the dynamic /lots/[lot] route) --
+  // land on the first open lot by default; the page's own dropdown picks any
+  // other lot from there.
+  const lots = listGlLots();
+  const defaultLot = lots.find((l) => (l.status ?? "").toLowerCase() === "open")?.lot ?? lots[0]?.lot;
+
+  const NAV = [
+    { href: "/", label: "Overview", icon: LayoutDashboard },
+    { href: "/inventory", label: "Inventory", icon: Boxes },
+    { href: "/lots", label: "Master Lot Schedule", icon: ListTree },
+    { href: defaultLot ? `/lots/${encodeURIComponent(defaultLot)}` : "/lots", label: "Lot Detail", icon: FileText },
+    { href: "/cost-of-gain", label: "Cost of Gain", icon: TrendingUp },
+    { href: "/lot-scorecard", label: "Lot Scorecard", icon: ClipboardList },
+    { href: "/market-position", label: "Market Position", icon: LineChart },
+  ];
 
   return (
     <div className="flex min-h-screen">

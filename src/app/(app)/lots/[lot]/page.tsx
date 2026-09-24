@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { getLotSheet } from "@/lib/data/lot-sheet";
+import { listGlLots } from "@/lib/data/cost-of-gain";
 import { getLotFlow } from "@/lib/data/lot-flow";
 import { getMonthlyHeadSeries, getWeeklyCostSeries } from "@/lib/data/gl";
 import { StatTile } from "@/components/stat-tile";
@@ -10,6 +11,7 @@ import { formatMoney, formatNumber, formatDate, formatPct } from "@/lib/format";
 import { LotFlowChart } from "./lot-flow-chart";
 import { MonthlyHeadChart } from "./monthly-head-chart";
 import { WeeklyCostChart } from "../../cost-of-gain/weekly-cost-chart";
+import { LotDetailPicker } from "./lot-detail-picker";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +35,7 @@ export default async function LotSheetPage({ params }: { params: Promise<{ lot: 
   const flow = getLotFlow(lot, summary.head_on_hand ?? 0);
   const monthlyHead = getMonthlyHeadSeries(lot);
   const weeklyCost = getWeeklyCostSeries(lot);
+  const allLots = listGlLots().map((l) => ({ lot: l.lot, status: l.status }));
 
   return (
     <div className="flex flex-col gap-6">
@@ -44,7 +47,10 @@ export default async function LotSheetPage({ params }: { params: Promise<{ lot: 
             {sheet.scheduleLocationType ?? "location n/a"} {sheet.scheduleState ? `· ${sheet.scheduleState}` : ""}
           </p>
         </div>
-        <Badge variant={summary.status?.toLowerCase() === "open" ? "good" : "neutral"}>{summary.status ?? "Unknown"}</Badge>
+        <div className="flex items-center gap-3">
+          <LotDetailPicker lots={allLots} current={lot} />
+          <Badge variant={summary.status?.toLowerCase() === "open" ? "good" : "neutral"}>{summary.status ?? "Unknown"}</Badge>
+        </div>
       </div>
 
       {sheet.crosswalk.decisionNeeded && (
@@ -93,7 +99,7 @@ export default async function LotSheetPage({ params }: { params: Promise<{ lot: 
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Activity</CardTitle>
-          <CardDescription>Every head movement on this lot, in order.</CardDescription>
+          <CardDescription>Every head movement and cost on this lot, in order.</CardDescription>
         </CardHeader>
         <Table>
           <TableHeader>
@@ -102,6 +108,7 @@ export default async function LotSheetPage({ params }: { params: Promise<{ lot: 
               <TableHead>Type</TableHead>
               <TableHead className="text-right">Head</TableHead>
               <TableHead className="text-right">Weight</TableHead>
+              <TableHead className="text-right">Amount</TableHead>
               <TableHead className="text-right">$/Head</TableHead>
               <TableHead>Notes</TableHead>
             </TableRow>
@@ -109,22 +116,25 @@ export default async function LotSheetPage({ params }: { params: Promise<{ lot: 
           <TableBody>
             {sheet.activity.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground">
+                <TableCell colSpan={7} className="text-center text-muted-foreground">
                   No activity recorded
                 </TableCell>
               </TableRow>
             )}
-            {sheet.activity.map((m, i) => (
+            {sheet.activity.map((row, i) => (
               <TableRow key={i}>
-                <TableCell>{formatDate(m.date)}</TableCell>
+                <TableCell>{formatDate(row.date)}</TableCell>
                 <TableCell>
-                  <Badge variant={MOVEMENT_BADGE[m.movement_type] ?? "neutral"}>{m.movement_type}</Badge>
+                  <Badge variant={row.category === "movement" ? (MOVEMENT_BADGE[row.type] ?? "neutral") : "outline"}>
+                    {row.type}
+                  </Badge>
                 </TableCell>
-                <TableCell className="text-right">{formatNumber(m.head)}</TableCell>
-                <TableCell className="text-right">{m.lbs ? `${formatNumber(m.lbs)} lb` : "—"}</TableCell>
-                <TableCell className="text-right">{formatMoney(m.dollars_per_head, { cents: true })}</TableCell>
-                <TableCell className="max-w-xs truncate text-muted-foreground" title={m.notes ?? undefined}>
-                  {m.notes ?? "—"}
+                <TableCell className="text-right">{row.head != null ? formatNumber(row.head) : "—"}</TableCell>
+                <TableCell className="text-right">{row.weight ? `${formatNumber(row.weight)} lb` : "—"}</TableCell>
+                <TableCell className="text-right">{formatMoney(row.amount)}</TableCell>
+                <TableCell className="text-right">{row.dollarsPerHead != null ? formatMoney(row.dollarsPerHead, { cents: true }) : "—"}</TableCell>
+                <TableCell className="max-w-xs truncate text-muted-foreground" title={row.notes ?? undefined}>
+                  {row.notes ?? "—"}
                 </TableCell>
               </TableRow>
             ))}

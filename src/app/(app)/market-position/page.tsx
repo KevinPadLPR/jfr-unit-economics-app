@@ -5,6 +5,7 @@ import { ProvenanceBadge } from "@/components/provenance-badge";
 import { ReportUnavailableNotice } from "@/components/report-unavailable-notice";
 import { formatMoney, formatNumber, formatDate } from "@/lib/format";
 import Link from "next/link";
+import { UnrealizedByLotChart } from "../unrealized-by-lot-chart";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,14 @@ export default async function MarketPositionPage() {
       ) : (
         <ReportUnavailableNotice detail="No market quotes available." />
       )}
+
+      <UnrealizedByLotChart
+        data={rows.map((r) => ({
+          lot: r.lot,
+          unrealized: r.unrealized ?? 0,
+          lightCalfCaveat: r.lightCalfCaveat,
+        }))}
+      />
 
       <div className="overflow-hidden rounded-xl border border-border bg-card">
         <Table>

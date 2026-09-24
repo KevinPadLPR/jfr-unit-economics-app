@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { FilterSelect, ALL } from "@/components/filter-select";
 import { formatMoney, formatPerLb, formatNumber } from "@/lib/format";
 import type { ScorecardRow } from "@/lib/data/scorecard";
+import { CostOfGainChart } from "./cost-of-gain-chart";
 
 const CONFIDENCE_LABEL: Record<ScorecardRow["confidence"], string> = {
   H: "High",
@@ -48,6 +49,8 @@ export function ScorecardTable({ rows }: { rows: ScorecardRow[] }) {
         <FilterSelect label="Feed type" value={feedType} options={uniqueOptions(rows, "feedType")} onChange={setFeedType} className="w-40" />
         <FilterSelect label="Location type" value={locationType} options={uniqueOptions(rows, "locationType")} onChange={setLocationType} className="w-40" />
       </div>
+
+      <CostOfGainChart rows={filtered} />
 
       <div className="overflow-hidden rounded-xl border border-border bg-card">
         <Table>

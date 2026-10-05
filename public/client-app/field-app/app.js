@@ -1,0 +1,3824 @@
+// =========================================================
+// SUPABASE — the ranch books
+// =========================================================
+// The field app never writes to the books directly. Everything a cowboy
+// saves lands in pending_field_entries (a staging table), and the office
+// reviews and approves it before it becomes a real doctoring/death/move
+// row. RLS enforces that: this app's token cannot write anywhere else.
+//
+// Replaces the old Google Apps Script transport. That one used
+// mode:'no-cors', so it could not read the response and a rejected write
+// looked exactly like a good one. This one sees real errors.
+const SUPABASE_URL = 'https://xpfmebdzcxorvwikfvtj.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_LhyJ7-bxebSa7HuRTxjmBQ__73Oc-66';
+const STAGING_TABLE = 'pending_field_entries';
+
+// If the library did not load, say so plainly. Before this guard, this line
+// threw and took the remaining ~2,200 lines of this file with it - including
+// every event handler - so the page rendered normally and every button was
+// simply inert, with nothing on screen to explain why.
+if (!window.supabase || typeof window.supabase.createClient !== 'function') {
+    if (window.__reportBootError) {
+        window.__reportBootError('the Supabase library did not load. Tap "Reset app" below, ' +
+                                 'or check your connection and reload.');
+    }
+    throw new Error('Supabase library not available');
+}
+
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: { persistSession: true, autoRefreshToken: true }
+});
+
+// Set once a session is confirmed. Every staged row is stamped with this.
+let currentUserId = null;
+let currentProfile = null;
+
+// --- UI ELEMENT SELECTORS ---
+const doctoringTabBtn = document.getElementById('doctoringTabBtn');
+const movesTabBtn = document.getElementById('movesTabBtn');
+const historyTabBtn = document.getElementById('historyTabBtn');
+
+const doctoringForm = document.getElementById('doctoringForm');
+const pastureSection = document.getElementById('pastureSection');
+const pastureTabBtn = document.getElementById('pastureTabBtn');
+const movesForm = document.getElementById('movesForm');
+const historySection = document.getElementById('historySection');
+
+const recordTableBody = document.getElementById('recordTableBody');
+const movesTableBody = document.getElementById('movesTableBody');
+const tableContainer = document.getElementById('tableContainer'); 
+const movesTableContainer = document.getElementById('movesTableContainer');
+
+const syncCloudBtn = document.getElementById('syncCloudBtn');
+const tagNumberInput = document.getElementById('tagNumber');
+const tagAlert = document.getElementById('tagAlert'); 
+const dateTimeInput = document.getElementById('dateTime');
+const treatmentTypeInput = document.getElementById('treatmentType');
+const submitBtn = document.getElementById('submitBtn'); 
+
+const lotInput = document.getElementById('lotNumber');
+const drugOffInput = document.getElementById('drugOff');
+const propertyInput = document.getElementById('propertyInput');
+const pastureInput = document.getElementById('pastureInput');
+const medicationList = document.getElementById('medicationList');
+const med1 = document.getElementById('medication1');
+const dose1 = document.getElementById('dosage1');
+const med2 = document.getElementById('medication2');
+const dose2 = document.getElementById('dosage2');
+const med3 = document.getElementById('medication3');
+const dose3 = document.getElementById('dosage3');
+
+const recordedByInput = document.getElementById('recordedBy'); 
+const moveRecordedByInput = document.getElementById('moveRecordedBy'); 
+const noTagBtn = document.getElementById('noTagBtn'); 
+const clearTagBtn = document.getElementById('clearTagBtn'); 
+
+// --- APP DATABASES ---
+// Reading saved state must never be able to stop the app booting. A value
+// that will not parse is discarded and the default used instead: losing a
+// cached lookup is recoverable with one Pull, losing the whole app is not.
+function loadJSON(key, fallback) {
+    let raw;
+    try { raw = localStorage.getItem(key); } catch (e) { return fallback; }
+    if (raw === null || raw === undefined || raw === '') return fallback;
+    try {
+        const parsed = JSON.parse(raw);
+        return (parsed === null || parsed === undefined) ? fallback : parsed;
+    } catch (e) {
+        console.warn(`Discarding corrupt localStorage value for ${key}:`, raw && raw.slice(0, 80));
+        try { localStorage.removeItem(key); } catch (e2) {}
+        return fallback;
+    }
+}
+
+let records = loadJSON('betaCattleRecords', []);
+let movesRecords = loadJSON('betaCattleMoves', []);
+let medsDatabase = loadJSON('betaCattleMeds', []);
+let locsDatabase = loadJSON('betaCattleLocs', []);
+let lotsDatabase = loadJSON('betaCattleLots', []);
+let protocolsDatabase = loadJSON('betaCattleProtocols', []);
+
+// Treatments already in the ranch books (doctoring_events), as opposed to
+// `records`, which is what THIS app has submitted. Kept separate on purpose:
+// these are read-only reference rows and must never be editable, deletable
+// or re-submittable from the field app. Tag recall and the safety checks
+// consult both; everything that writes only ever touches `records`.
+let booksHistory = loadJSON('betaCattleBooksHistory', []);
+
+// tag number -> "Ranch - Pasture", only for tags whose location is actually
+// knowable from the books. See the resolution rules in pullCloudData().
+let tagLocationMap = loadJSON('betaCattleTagLocations', {});
+
+// tag number -> lot number, straight from lot_tags. This is the ONLY
+// reliable tag->lot mapping: lots.start_tag/end_tag covers 100 of 1,782
+// open tags (most lots have no range at all, and hundreds of tags sit
+// outside their lot's range), so the range is a last-ditch fallback only.
+let tagLotMap = loadJSON('betaCattleTagLots', {});
+
+// "Ranch - Pasture" -> [{lot, head}] standing there. Drives the move form's
+// lot picker: lot_movements.lot_id is NOT NULL, and a pasture holding two
+// lots (Shop/Bull Trap holds 37X-1 and 59X) cannot be resolved after the
+// fact — the cowboy at the gate is the only one who knows which moved.
+let pastureLotsMap = loadJSON('betaCattlePastureLots', {});
+
+// tag number -> { why, places } for tags whose location is NOT knowable.
+// The books track pasture per LOT, not per animal, so a load that turned out
+// into two pastures leaves every tag on it genuinely ambiguous. Saying that
+// out loud, with the shortlist, beats an empty box that reads as a bug.
+let tagCandidateMap = loadJSON('betaCattleTagCandidates', {});
+
+// Per-receipt tag ranges, for a tag that is physically in the pasture but not
+// registered in lot_tags yet.
+let tagRanges = loadJSON('betaCattleTagRanges', []);
+
+// One place that answers "which lot is this tag on", best source first.
+// Assigning an unknown value to a <select> silently does nothing - the
+// element just stays on its placeholder. Lot and Pasture are both selects
+// fed from cached lookups, so any gap in that cache showed up as a blank
+// field with no error: the tag resolved fine, the option simply was not
+// there to select. Report it instead of swallowing it.
+function setSelectValue(select, value) {
+    if (!select) return false;
+    const want = String(value == null ? '' : value).trim();
+    if (!want) return false;
+    const ok = Array.from(select.options).some(o => o.value === want);
+    if (ok) select.value = want;
+    return ok;
+}
+
+// THE one way a text tag is matched to lot_tags.tag_number (an integer).
+// Mirrors public.tag_to_int() in the database and tagToInt() in the office
+// app: plain digits, no leading zero -> the number; NT<n> or anything else ->
+// null, so an untagged animal never matches a registered tag. Do not
+// parseInt a tag: parseInt('12abc') is 12 and parseInt('0123') is 123.
+function tagToInt(tag) {
+    const s = String(tag == null ? '' : tag).trim();
+    return /^[1-9][0-9]{0,8}$/.test(s) ? Number(s) : null;
+}
+// Key into the caches built from lot_tags (tagLotMap, tagLocationMap,
+// tagCandidateMap), which are keyed String(tag_number). '' never matches.
+function tagKey(tag) {
+    const n = tagToInt(tag);
+    return n == null ? '' : String(n);
+}
+
+function resolveLotForTag(tag) {
+    const key = tagKey(tag);
+    if (!key) return '';
+    // 1. Registered in lot_tags - authoritative.
+    if (tagLotMap[key]) return tagLotMap[key];
+    const n = Number(key);
+    // 2. Inside a delivery receipt's tag range.
+    const hit = tagRanges.find(r => n >= r.start && n <= r.end);
+    if (hit) return hit.lotNumber;
+    // 3. lots.start_tag/end_tag - first load only, so genuinely last resort.
+    const lot = lotsDatabase.find(l =>
+        l.startTag != null && l.endTag != null && n >= parseInt(l.startTag) && n <= parseInt(l.endTag));
+    return lot ? lot.lotNumber : '';
+}
+
+// Every read-only lookup by tag must see the books as well as this phone's
+// own submissions, otherwise an animal treated last month looks brand new.
+function historyPool() {
+    return records.concat(booksHistory);
+}
+
+let currentEstWeight = 0; 
+let editingRecordId = null;
+let editingMoveId = null;
+let deleteTimers = {}; 
+
+// --- SYNC QUEUE & TOMBSTONES (offline resilience) ---
+const SYNC_QUEUE_KEY = 'betaCattleSyncQueue';
+const TOMBSTONES_KEY = 'betaCattleTombstones';
+const REJECTED_KEY = 'betaCattleRejected';   // pre-v22 summaries; folded into FAILED_KEY
+// Dead letters: entries the server refused for good, kept WHOLE. Never
+// pruned, never on the reset lists - a failed entry is animal health data
+// the office has not seen, and the phone may be the only copy.
+const FAILED_KEY = 'betaCattleFailed';
+let syncQueue = loadJSON(SYNC_QUEUE_KEY, []);
+let failedEntries = loadJSON(FAILED_KEY, []);
+let tombstones = loadJSON(TOMBSTONES_KEY, {});
+let isSyncingQueue = false;
+const MAX_SYNC_ATTEMPTS = 25;   // ~25 min of retries before we call it dead
+let isSubmittingDoctoring = false;
+let isSubmittingMove = false;
+
+// --- FIELD LOCKS (sticky fields for chute work) ---
+const LOCKS_KEY = 'betaCattleLocks';
+let locks = loadJSON(LOCKS_KEY, { ranch: false, pasture: false, lot: false, action: false });
+// Pasture locked without ranch is invalid — repair stale state from older versions
+if (locks.pasture && !locks.ranch) locks.ranch = true;
+
+// Drug-off group reference (drugOffInput already declared above in selectors block)
+const drugOffGroup = document.getElementById('drugOffGroup');
+
+// =========================================================
+// REMEMBER ME (CREW MEMBER SYNC)
+// =========================================================
+const savedName = localStorage.getItem('crewMemberName') || '';
+recordedByInput.value = savedName;
+moveRecordedByInput.value = savedName;
+
+recordedByInput.addEventListener('input', (e) => moveRecordedByInput.value = e.target.value);
+moveRecordedByInput.addEventListener('input', (e) => recordedByInput.value = e.target.value);
+
+// =========================================================
+// TOAST NOTIFICATIONS (replace alert for hot-path messages)
+// =========================================================
+function showToast(message, type = 'success', duration = 2000) {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+
+    // Haptic feedback where available (Android; iOS Safari ignores but harmless)
+    try {
+        if (navigator.vibrate) {
+            navigator.vibrate(type === 'error' ? [50, 40, 50] : 30);
+        }
+    } catch (e) { /* no-op */ }
+
+    // Force reflow then animate in
+    requestAnimationFrame(() => toast.classList.add('show'));
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+    }, duration);
+}
+
+// =========================================================
+// SYNC QUEUE — all writes go through here instead of fire-and-forget
+// =========================================================
+// =========================================================
+// SAFE localStorage WRAPPER
+// Browsers throw QuotaExceededError when the ~5MB cap is hit.
+// On failure we prune old records and retry, then show a toast.
+// =========================================================
+let _storageWarned = false;
+
+function pruneOldRecords() {
+    // Drop doctoring records older than 60 days; cloud has the archive.
+    const cutoff = Date.now() - (60 * 24 * 60 * 60 * 1000);
+    const before = records.length;
+    records = records.filter(r => {
+        if (!r.dateTime) return true;
+        const t = new Date(String(r.dateTime).split('T')[0]).getTime();
+        return isNaN(t) || t >= cutoff;
+    });
+    const moveBefore = movesRecords.length;
+    movesRecords = movesRecords.filter(m => {
+        if (!m.date) return true;
+        const t = new Date(String(m.date).split('T')[0]).getTime();
+        return isNaN(t) || t >= cutoff;
+    });
+    return (before - records.length) + (moveBefore - movesRecords.length);
+}
+
+function safeSetItem(key, value) {
+    try {
+        localStorage.setItem(key, value);
+        return true;
+    } catch (err) {
+        const isQuota = err && (err.name === 'QuotaExceededError' || err.code === 22 || err.code === 1014);
+        if (!isQuota) {
+            console.error('localStorage error:', err);
+            if (!_storageWarned) {
+                showToast('⚠ Storage error — record may not persist', 'error', 3500);
+                _storageWarned = true;
+            }
+            return false;
+        }
+        const pruned = pruneOldRecords();
+        try {
+            localStorage.setItem('betaCattleRecords', JSON.stringify(records));
+            localStorage.setItem('betaCattleMoves',   JSON.stringify(movesRecords));
+            localStorage.setItem(key, value);
+            showToast(`⚠ Storage full — pruned ${pruned} old records`, 'error', 4000);
+            return true;
+        } catch (err2) {
+            console.error('localStorage still failing after prune:', err2);
+            if (!_storageWarned) {
+                showToast('🛑 Storage full. Pull Cloud, then clear app data.', 'error', 5000);
+                _storageWarned = true;
+            }
+            return false;
+        }
+    }
+}
+
+function saveQueue() {
+    safeSetItem(SYNC_QUEUE_KEY, JSON.stringify(syncQueue));
+}
+
+function saveTombstones() {
+    safeSetItem(TOMBSTONES_KEY, JSON.stringify(tombstones));
+}
+
+function enqueueForSync(payload) {
+    // De-dupe: drop any earlier queued entry for the same id.
+    // The newest version of a record supersedes older ones, including
+    // a delete superseding a previous save.
+    if (payload && payload.id) {
+        const targetId = String(payload.id);
+        const before = syncQueue.length;
+        syncQueue = syncQueue.filter(q => String(q.id) !== targetId);
+        if (before !== syncQueue.length) {
+            console.log(`Sync queue: superseded ${before - syncQueue.length} stale entry for id ${targetId}`);
+        }
+    }
+    syncQueue.push({ ...payload, _attempts: 0, _queuedAt: Date.now() });
+    saveQueue();
+    updateSyncBadge();
+    if (navigator.onLine) {
+        processSyncQueue();
+    }
+}
+
+// A PERMANENT error is the database refusing the row on its merits; it
+// will fail the same way every time, so retrying only burns battery on a
+// phone in a pasture. Those leave the queue for the Failed list, whole,
+// with the error - never dropped. Everything else (no signal, timeouts,
+// 5xx, an expired session) stays queued and retries as before.
+//   42501  not authorized (RLS) - e.g. a user deactivated after queuing
+//   23xxx  integrity: check, not-null, foreign key, unique
+//   22xxx  bad data: malformed number, date, uuid
+//   P0001  our own guard triggers (an entry the office already settled)
+function isPermanentError(error) {
+    const code = String((error && error.code) || '');
+    return code === '42501' || code === 'P0001' || /^2[23]/.test(code);
+}
+
+// The error in words a cowboy can act on. The code and the server's own
+// message are kept beside it for whoever gets the Copy.
+function plainError(error) {
+    const code = String((error && error.code) || '');
+    const msg = String((error && error.message) || '');
+    if (code === '42501') return 'Not authorized. Your account can no longer send entries (it may have been deactivated or its role changed). Ask the office to check your account, then tap Retry.';
+    if (code === '23505') return 'Duplicate. The office already has an entry with this id.';
+    if (code === '23514' && /tag_number/.test(msg)) return 'Tag not accepted. A tag must be plain digits with no leading zero, or NT and a number for an untagged animal. Fix the record, then Retry.';
+    if (code === '23514') return 'A value was out of range or not allowed, so the office database refused it.';
+    if (code === '23502') return 'A required field was empty.';
+    if (code === '23503') return 'It points at something that no longer exists (a lot, pasture or user).';
+    if (/^23/.test(code)) return 'The office database refused it as inconsistent with what it already holds.';
+    if (/^22/.test(code)) return 'Bad data: a date, number or id is not in a valid format.';
+    if (code === 'P0001') return 'The office already settled this entry (approved or rejected), so the phone cannot change it.';
+    if (code === 'GAVE_UP') return msg;
+    return 'The server refused it.';
+}
+
+// "2026-08-24T14:32:01" carries no zone. new Date() reads that DATE-TIME
+// form as LOCAL time, which is what the cowboy meant, and toISOString()
+// converts it to UTC correctly for a timestamptz column.
+//
+// A DATE-ONLY string is the trap: JS parses "2026-08-24" as UTC midnight,
+// not local midnight. In Texas that is 7pm the PREVIOUS day, so a move
+// would show up in the office dated a day early. Moves carry a bare date,
+// so pin those to local midnight explicitly.
+function toIsoOrNull(value) {
+    if (!value) return null;
+    const str = String(value);
+    const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(str);
+    const d = new Date(dateOnly ? str + 'T00:00:00' : str);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+// Whole days from a date-only arrival string to today, in LOCAL time.
+// The same date-only trap as above bit the estimated-weight box: it did
+//   const arrival = new Date("2026-08-11");   // UTC midnight
+//   arrival.setHours(0,0,0,0);                // -> local midnight Aug 10
+// which in Texas rewinds a day, so every lot read one day heavier than the
+// books. Build the date from its parts and no timezone is involved.
+function daysOnFeedFrom(dateStr) {
+    if (!dateStr) return 0;
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateStr));
+    if (!m) return 0;
+    const arrival = new Date(+m[1], +m[2] - 1, +m[3]);
+    if (isNaN(arrival.getTime())) return 0;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return Math.max(0, Math.round((today - arrival) / 86400000));
+}
+
+// Map a field payload onto the staging row. `raw` is the payload verbatim
+// and is never edited — the office resolves lot/pasture/action/meds at
+// review time against live data, so the client deliberately does NOT
+// guess at those foreign keys here.
+function toStagingRow(record) {
+    const kind = record.type === 'move' ? 'move'
+               : record.type === 'count' ? 'count'
+               : record.type === 'weight' ? 'weight'
+               : 'doctoring';
+    // Trimmed, and an NT tag upper-cased: the database CHECK accepts only
+    // ^([1-9][0-9]*|NT[0-9]+)$, so 'nt3' would be refused on sync.
+    const rawTag = String(record.tagNumber || '').trim();
+    const tag = /^nt/i.test(rawTag) ? rawTag.toUpperCase() : rawTag;
+
+    // A count and a weight both carry a head figure and a plain date, and
+    // neither has a tag. head_count is what the office lists them by.
+    if (kind === 'count' || kind === 'weight') {
+        const head = kind === 'count'
+            ? parseInt(record.countedHead, 10)
+            : (record.drafts || []).reduce((t, d) => t + (parseInt(d.head, 10) || 0), 0);
+        return {
+            entry_type: kind,
+            client_id: String(record.id),
+            raw: record,
+            tag_number: null,
+            no_tag: false,
+            event_datetime: toIsoOrNull(record.date),
+            head_count: isNaN(head) ? 0 : head,
+            submitted_by: currentUserId,
+            status: 'pending'
+        };
+    }
+
+    return {
+        entry_type: kind,
+        client_id: String(record.id),
+        raw: record,
+        tag_number: kind === 'move' ? null : (tag || null),
+        no_tag: kind !== 'move' && /^NT\d*$/i.test(tag),
+        event_datetime: toIsoOrNull(kind === 'move' ? record.date : record.dateTime),
+        head_count: kind === 'move' ? (parseInt(record.headCount, 10) || 0) : null,
+        submitted_by: currentUserId,
+        status: 'pending'
+    };
+}
+
+// Returns true when the item can leave the queue (delivered, or rejected
+// on its merits and reported), false to keep it queued for another try.
+async function sendOne(payload) {
+    if (!currentUserId) return false;   // not signed in yet; stay queued
+
+    const { _attempts, _queuedAt, ...record } = payload;
+
+    try {
+        let error;
+
+        if (record.action === 'delete') {
+            // A record the cowboy deleted in the field. Withdraw it so it
+            // stops showing up in the office queue as something live.
+            // Guarded to status='pending' so a withdrawal that arrives
+            // after the office already approved it cannot take it back.
+            ({ error } = await sb
+                .from(STAGING_TABLE)
+                .update({ status: 'withdrawn' })
+                .eq('entry_type', record.type === 'move' ? 'move' : 'doctoring')
+                .eq('client_id', String(record.id))
+                .eq('status', 'pending'));
+        } else {
+            // Upsert, not insert: the app lets a cowboy edit a saved
+            // record and re-queues it under the SAME id, so the second
+            // delivery has to update the staged row rather than collide.
+            ({ error } = await sb
+                .from(STAGING_TABLE)
+                .upsert(toStagingRow(record), { onConflict: 'entry_type,client_id' }));
+        }
+
+        if (!error) return true;
+
+        if (isPermanentError(error)) {
+            moveToFailed(payload, error);
+            return true;    // out of the queue; kept whole on the Failed list
+        }
+
+        console.warn('sendOne transient error:', error);
+        return false;       // server hiccup / offline — try again later
+    } catch (err) {
+        console.warn('sendOne network error:', err);
+        return false;
+    }
+}
+
+// =========================================================
+// DEAD LETTERS - the Failed list
+// A refused entry must never disappear quietly, and must never be lost:
+// the WHOLE queued payload is kept, with the error, the user it was
+// queued under and when. Nothing here deletes an entry. Retry moves it
+// back to the queue (and a second refusal brings it back here); Mark
+// handled keeps it stored but takes it off the red badge.
+// =========================================================
+function saveFailed() {
+    // If this write fails the entry is still in memory and the toast from
+    // safeSetItem says storage is in trouble; it is not silently gone.
+    safeSetItem(FAILED_KEY, JSON.stringify(failedEntries));
+}
+
+function moveToFailed(payload, error) {
+    console.error('Entry refused by server, moved to Failed:', payload, error);
+    const { _attempts, _queuedAt, ...entry } = payload;
+    failedEntries.unshift({
+        key: String(entry.id) + ':' + Date.now(),
+        entry,                                   // the full record, verbatim
+        attempts: _attempts || 0,
+        queuedAt: _queuedAt || null,
+        userId: currentUserId || null,
+        code: String((error && error.code) || ''),
+        message: String((error && error.message) || ''),
+        details: (error && (error.details || error.hint)) || null,
+        plain: plainError(error),
+        failedAt: new Date().toISOString(),
+        handledAt: null
+    });
+    saveFailed();
+    updateFailedBadge();
+    showToast(`\u26d4 Not sent: ${plainError(error)}`, 'error', 6000);
+}
+
+// Pre-v22 phones kept only a summary of each rejection under REJECTED_KEY.
+// Fold those in once, marked summary-only, so they are visible too. The
+// old key is left in place: this migration deletes nothing.
+(function foldOldRejections() {
+    const old = loadJSON(REJECTED_KEY, []);
+    if (!Array.isArray(old) || !old.length) return;
+    const seen = new Set(failedEntries.map(f => f.key));
+    let added = 0;
+    old.forEach(r => {
+        const key = 'legacy:' + r.id + ':' + r.at;
+        if (seen.has(key)) return;
+        failedEntries.push({
+            key, entry: null, summaryOnly: true,
+            summary: { id: r.id, type: r.type, tag: r.tag },
+            attempts: null, queuedAt: null, userId: null,
+            code: '', message: r.reason || '', details: null,
+            plain: 'Refused before this version kept whole entries; only this summary survives.',
+            failedAt: r.at || null, handledAt: null
+        });
+        added++;
+    });
+    if (added) saveFailed();
+})();
+
+// Shown to the signed-in user only: a phone can be shared, and another
+// person's entries are theirs to retry. Entries from before sign-in was
+// recorded (userId null) show to whoever is signed in.
+function visibleFailed() {
+    return failedEntries.filter(f => !f.userId || !currentUserId || f.userId === currentUserId);
+}
+function openFailedCount() {
+    return visibleFailed().filter(f => !f.handledAt).length;
+}
+
+function updateFailedBadge() {
+    const b = document.getElementById('failedBadge');
+    if (!b) return;
+    const n = openFailedCount();
+    b.style.display = n > 0 ? 'inline-block' : 'none';
+    b.textContent = `\u26d4 ${n} failed`;
+}
+
+// Phone-local time for display; the stored value stays ISO.
+function localStamp(iso) {
+    const d = new Date(iso);
+    return isNaN(d) ? String(iso) : d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function describeFailed(f) {
+    if (f.summaryOnly) {
+        const s = f.summary || {};
+        return { what: (s.type || 'entry') + (s.tag ? ' \u00b7 ' + s.tag : ''), when: '' };
+    }
+    const e = f.entry || {};
+    const type = e.action === 'delete' ? 'delete of ' + (e.type || 'doctoring')
+               : (e.type || 'doctoring');
+    const bits = [];
+    if (e.tagNumber) bits.push('tag ' + e.tagNumber);
+    if (e.treatmentType) bits.push(e.treatmentType);
+    if (e.fromPasture || e.toPasture) bits.push(`${e.fromRanch || ''} ${e.fromPasture || ''} \u2192 ${e.toRanch || ''} ${e.toPasture || ''}`.trim());
+    if (e.headCount || e.countedHead) bits.push((e.headCount || e.countedHead) + ' hd');
+    return { what: type + (bits.length ? ' \u00b7 ' + bits.join(' \u00b7 ') : ''),
+             when: String(e.dateTime || e.date || '').replace('T', ' ').slice(0, 16) };
+}
+
+function renderFailedList() {
+    const box = document.getElementById('failedList');
+    if (!box) return;
+    const showHandled = !!(document.getElementById('failedShowHandled') || {}).checked;
+    const list = visibleFailed().filter(f => showHandled || !f.handledAt);
+    const hidden = failedEntries.length - visibleFailed().length;
+    if (!list.length) {
+        box.innerHTML = '<p class="failed-empty">Nothing failed.</p>';
+    } else {
+        box.innerHTML = list.map(f => {
+            const d = describeFailed(f);
+            const k = escapeHtml(f.key);
+            return `<div class="failed-item${f.handledAt ? ' handled' : ''}">
+                <div class="failed-what">${escapeHtml(d.what)}</div>
+                ${d.when ? `<div class="failed-when">${escapeHtml(d.when)}</div>` : ''}
+                <div class="failed-why">${escapeHtml(f.plain)}</div>
+                <div class="failed-tech">${escapeHtml([f.code, f.message].filter(Boolean).join(' \u2014 '))}${f.failedAt ? ' \u00b7 failed ' + escapeHtml(localStamp(f.failedAt)) : ''}${f.handledAt ? ' \u00b7 marked handled' : ''}</div>
+                <div class="failed-actions">
+                    ${f.summaryOnly ? '' : `<button type="button" data-failed-act="retry" data-key="${k}">Retry</button>`}
+                    <button type="button" data-failed-act="copy" data-key="${k}">Copy</button>
+                    ${f.handledAt ? '' : `<button type="button" class="secondary" data-failed-act="handled" data-key="${k}">Mark handled</button>`}
+                </div>
+            </div>`;
+        }).join('');
+    }
+    const note = document.getElementById('failedOtherUsers');
+    if (note) {
+        note.style.display = hidden > 0 ? 'block' : 'none';
+        note.textContent = `${hidden} failed entr${hidden === 1 ? 'y' : 'ies'} from another sign-in on this phone ${hidden === 1 ? 'is' : 'are'} kept and not shown.`;
+    }
+}
+
+// One delegated listener: keys go through a data attribute, never through
+// a JS string inside an onclick.
+document.addEventListener('click', (ev) => {
+    const btn = ev.target.closest && ev.target.closest('[data-failed-act]');
+    if (!btn) return;
+    const key = btn.getAttribute('data-key');
+    const act = btn.getAttribute('data-failed-act');
+    if (act === 'retry') window.retryFailed(key);
+    else if (act === 'copy') window.copyFailed(key);
+    else if (act === 'handled') window.markFailedHandled(key);
+});
+
+window.openFailed = () => {
+    renderFailedList();
+    document.getElementById('failedModal').style.display = 'block';
+    document.body.classList.add('modal-open');
+};
+window.closeFailed = () => {
+    document.getElementById('failedModal').style.display = 'none';
+    document.body.classList.remove('modal-open');
+};
+
+window.retryFailed = (key) => {
+    const i = failedEntries.findIndex(f => f.key === key);
+    if (i < 0) return;
+    const f = failedEntries[i];
+    if (f.summaryOnly || !f.entry) return;
+    if (f.userId && currentUserId && f.userId !== currentUserId) {
+        showToast('\u26d4 Queued under another sign-in; that person has to retry it.', 'error', 4000);
+        return;
+    }
+    // A newer version of the same record already waiting must not be
+    // superseded by this older one.
+    if (syncQueue.some(q => String(q.id) === String(f.entry.id))) {
+        showToast('A newer version of this record is already waiting to send.', 'error', 4000);
+        return;
+    }
+    // Moved, not deleted: out of Failed and back into the queue in the same
+    // step. A second refusal lands it here again with the new error.
+    failedEntries.splice(i, 1);
+    saveFailed();
+    syncQueue.push({ ...f.entry, _attempts: 0, _queuedAt: Date.now() });
+    saveQueue();
+    updateFailedBadge();
+    updateSyncBadge();
+    renderFailedList();
+    if (navigator.onLine) processSyncQueue().then(renderFailedList);
+    else showToast('Queued. It will send when there is signal.', 'success', 2000);
+};
+
+window.copyFailed = async (key) => {
+    const f = failedEntries.find(x => x.key === key);
+    if (!f) return;
+    const text = JSON.stringify({
+        failed: { code: f.code, message: f.message, details: f.details, plain: f.plain,
+                  failedAt: f.failedAt, attempts: f.attempts, userId: f.userId },
+        entry: f.entry || f.summary
+    }, null, 2);
+    try {
+        await navigator.clipboard.writeText(text);
+        showToast('Copied. Paste it into a text to the office.', 'success', 2000);
+    } catch (e) {
+        // No clipboard permission (older iOS, http): show it to select by hand.
+        window.prompt('Copy this and send it to the office:', text);
+    }
+};
+
+window.markFailedHandled = (key) => {
+    const f = failedEntries.find(x => x.key === key);
+    if (!f) return;
+    if (!confirm('Mark handled? It stays stored on this phone (tick "Show handled" to see it again); it just leaves the red badge.')) return;
+    f.handledAt = new Date().toISOString();
+    saveFailed();
+    updateFailedBadge();
+    renderFailedList();
+};
+
+async function processSyncQueue() {
+    if (isSyncingQueue) return;
+    if (!navigator.onLine) { updateSyncBadge(); return; }
+    if (syncQueue.length === 0) { updateSyncBadge(); return; }
+
+    isSyncingQueue = true;
+    updateSyncBadge();
+
+    // Snapshot & drain
+    const pending = [...syncQueue];
+    const stillFailed = [];
+    const failedBefore = failedEntries.length;
+
+    for (const item of pending) {
+        const ok = await sendOne(item);
+        if (!ok) {
+            item._attempts = (item._attempts || 0) + 1;
+            // Backstop. _attempts was counted but never checked before,
+            // which was harmless when every send reported success. Now a
+            // record that keeps failing transiently would otherwise retry
+            // every 60s forever.
+            if (item._attempts >= MAX_SYNC_ATTEMPTS) {
+                // Kept whole on the Failed list, not dropped: Retry re-queues it.
+                moveToFailed(item, { code: 'GAVE_UP',
+                    message: `Could not reach the office after ${item._attempts} tries. Tap Retry when there is signal.` });
+            } else {
+                stillFailed.push(item);
+            }
+        }
+    }
+
+    syncQueue = stillFailed;
+    saveQueue();
+    isSyncingQueue = false;
+    updateSyncBadge();
+
+    // "All synced" only when nothing was refused on this pass - a refusal
+    // already said so in red, and a green toast after it would contradict it.
+    if (stillFailed.length === 0 && pending.length > 0 && failedEntries.length === failedBefore) {
+        showToast('☁️ All records synced', 'success', 1500);
+    }
+}
+
+function updateSyncBadge() {
+    // The queue drains on a timer; if the troubleshooting modal is open the
+    // reset gate should unblock itself rather than needing a reopen.
+    // Looked up directly rather than via the `troubleModal` const: that const
+    // is declared far below this function, so touching it here would be a
+    // temporal-dead-zone throw if the call order ever changes.
+    const tm = document.getElementById('troubleModal');
+    if (tm && tm.style.display === 'block') refreshResetState();
+
+    updateFailedBadge();
+    const badge = document.getElementById('syncBadge');
+    if (!badge) return;
+    const n = syncQueue.length;
+    if (n === 0 && navigator.onLine) {
+        badge.style.display = 'none';
+    } else if (!navigator.onLine) {
+        badge.style.display = 'inline-block';
+        badge.className = 'sync-badge offline';
+        badge.textContent = n > 0 ? `⚠ Offline · ${n} pending` : '⚠ Offline';
+    } else {
+        badge.style.display = 'inline-block';
+        badge.className = isSyncingQueue ? 'sync-badge syncing' : 'sync-badge pending';
+        badge.textContent = isSyncingQueue ? `⏳ Syncing ${n}…` : `⏳ ${n} pending`;
+    }
+}
+
+// Retry triggers
+window.addEventListener('online', () => { updateSyncBadge(); processSyncQueue(); });
+window.addEventListener('offline', updateSyncBadge);
+window.addEventListener('focus', () => { if (navigator.onLine) processSyncQueue(); });
+setInterval(() => { if (navigator.onLine) processSyncQueue(); }, 60000);
+
+// =========================================================
+// LONG-PRESS TOOLTIPS (touch fallback for desktop hover tooltips)
+// Hold any element with a `title` attribute for ~500ms to see it
+// without firing the underlying tap.
+// =========================================================
+(function() {
+    let pressTimer = null;
+    let suppressTap = false;
+    let activeTooltip = null;
+
+    function clearTooltip() {
+        if (activeTooltip) {
+            activeTooltip.remove();
+            activeTooltip = null;
+        }
+    }
+
+    function showTooltipFor(el, x, y) {
+        const text = el.getAttribute('title') || el.getAttribute('aria-label');
+        if (!text) return;
+
+        clearTooltip();
+
+        // Hide native title temporarily so iOS doesn't double-show it
+        el.dataset._title = text;
+        el.removeAttribute('title');
+
+        const tip = document.createElement('div');
+        tip.className = 'longpress-tooltip';
+        tip.textContent = text;
+        document.body.appendChild(tip);
+        activeTooltip = tip;
+
+        // Position above the touch point, clamped to viewport
+        const tipW = tip.offsetWidth;
+        const tipH = tip.offsetHeight;
+        let left = x - tipW / 2;
+        let top = y - tipH - 14;
+        if (left < 8) left = 8;
+        if (left + tipW > window.innerWidth - 8) left = window.innerWidth - tipW - 8;
+        if (top < 8) top = y + 18; // flip below if no room above
+        tip.style.left = left + 'px';
+        tip.style.top  = top + 'px';
+
+        if (navigator.vibrate) { try { navigator.vibrate(15); } catch(e){} }
+
+        // Restore the title attribute when the tooltip is dismissed
+        setTimeout(() => {
+            if (el.dataset._title) {
+                el.setAttribute('title', el.dataset._title);
+                delete el.dataset._title;
+            }
+        }, 100);
+    }
+
+    function findTooltipTarget(target) {
+        // Walk up looking for an element with title or aria-label
+        let el = target;
+        while (el && el !== document.body) {
+            if (el.getAttribute && (el.getAttribute('title') || el.getAttribute('aria-label'))) {
+                return el;
+            }
+            el = el.parentElement;
+        }
+        return null;
+    }
+
+    document.addEventListener('touchstart', (e) => {
+        const el = findTooltipTarget(e.target);
+        if (!el) return;
+        const touch = e.touches[0];
+        const x = touch.clientX, y = touch.clientY;
+        suppressTap = false;
+        pressTimer = setTimeout(() => {
+            suppressTap = true;
+            showTooltipFor(el, x, y);
+        }, 500);
+    }, { passive: true });
+
+    function cancelPress() {
+        if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+    }
+
+    document.addEventListener('touchmove', cancelPress, { passive: true });
+    document.addEventListener('touchend', () => {
+        cancelPress();
+        // Dismiss tooltip on next tap anywhere
+        if (activeTooltip) {
+            setTimeout(clearTooltip, 1500);
+        }
+    }, { passive: true });
+    document.addEventListener('touchcancel', () => { cancelPress(); clearTooltip(); }, { passive: true });
+
+    // Suppress the click that would fire after a long-press
+    document.addEventListener('click', (e) => {
+        if (suppressTap) {
+            e.preventDefault();
+            e.stopPropagation();
+            suppressTap = false;
+        }
+    }, true);
+
+    // Tap anywhere to dismiss an active tooltip
+    document.addEventListener('click', () => clearTooltip());
+})();
+
+// =========================================================
+// SERVICE WORKER REGISTRATION (offline PWA)
+// =========================================================
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js')
+            .catch(err => console.warn('SW registration failed:', err));
+    });
+}
+
+// =========================================================
+// FIELD LOCKS — sticky ranch/pasture/lot/action across saves
+// =========================================================
+function saveLocks() {
+    safeSetItem(LOCKS_KEY, JSON.stringify(locks));
+}
+
+function renderLockButton(btn, field) {
+    if (locks[field]) {
+        btn.classList.add('locked');
+        btn.textContent = '🔒';
+        btn.setAttribute('aria-label', `Unlock ${field}`);
+    } else {
+        btn.classList.remove('locked');
+        btn.textContent = '🔓';
+        btn.setAttribute('aria-label', `Lock ${field}`);
+    }
+}
+
+function wireLockButton(id, field) {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    renderLockButton(btn, field);
+    btn.addEventListener('click', () => {
+        // Pasture can't be locked without Ranch — they're a hierarchy.
+        // Tap pasture lock (off) → lock both. Tap ranch lock (on) → unlock both.
+        if (field === 'pasture' && !locks.pasture) {
+            locks.ranch = true;
+            locks.pasture = true;
+        } else if (field === 'ranch' && locks.ranch) {
+            locks.ranch = false;
+            locks.pasture = false; // pasture can't stay locked alone
+        } else {
+            locks[field] = !locks[field];
+        }
+        saveLocks();
+
+        // Re-render any lock button that may have changed state
+        renderLockButton(document.getElementById('lockRanchBtn'),   'ranch');
+        renderLockButton(document.getElementById('lockPastureBtn'), 'pasture');
+        renderLockButton(document.getElementById('lockLotBtn'),     'lot');
+        renderLockButton(document.getElementById('lockActionBtn'),  'action');
+
+        updateChuteBanner();
+
+        if (navigator.vibrate) { try { navigator.vibrate(20); } catch(e){} }
+    });
+}
+
+wireLockButton('lockRanchBtn', 'ranch');
+wireLockButton('lockPastureBtn', 'pasture');
+wireLockButton('lockLotBtn', 'lot');
+wireLockButton('lockActionBtn', 'action');
+
+// Restore locked values to the form after a reset
+function restoreLockedValues(snapshot) {
+    if (snapshot.ranch) {
+        propertyInput.value = snapshot.ranch;
+        // Populate the pasture dropdown for the restored ranch
+        propertyInput.dispatchEvent(new Event('change'));
+    }
+    if (snapshot.pasture) {
+        // Make sure the option exists in the dropdown
+        let exists = Array.from(pastureInput.options).some(o => o.value === snapshot.pasture);
+        if (!exists) {
+            pastureInput.innerHTML += `<option value="${snapshot.pasture}">${snapshot.pasture}</option>`;
+        }
+        pastureInput.value = snapshot.pasture;
+        pastureInput.disabled = false;
+    }
+    if (snapshot.lot) {
+        let exists = Array.from(lotInput.options).some(o => o.value === snapshot.lot);
+        if (!exists) {
+            lotInput.innerHTML += `<option value="${snapshot.lot}">${snapshot.lot}</option>`;
+        }
+        lotInput.value = snapshot.lot;
+    }
+    if (snapshot.action) {
+        treatmentTypeInput.disabled = false;
+        treatmentTypeInput.value = snapshot.action;
+        // Defensive: explicitly mark the option selected too, in case .value alone
+        // doesn't update the displayed text on some mobile browsers
+        Array.from(treatmentTypeInput.options).forEach(o => {
+            o.selected = (o.value === snapshot.action);
+        });
+        // Fire the change handler so medications auto-fill from the protocol
+        treatmentTypeInput.dispatchEvent(new Event('change'));
+    }
+}
+
+function snapshotLockedValues() {
+    return {
+        ranch:   locks.ranch   ? propertyInput.value      : '',
+        pasture: locks.pasture ? pastureInput.value       : '',
+        lot:     locks.lot     ? lotInput.value           : '',
+        action:  locks.action  ? treatmentTypeInput.value : ''
+    };
+}
+
+// Visible banner showing what's locked — gives confidence that autofill is correct
+function updateChuteBanner() {
+    const banner = document.getElementById('chuteBanner');
+    if (!banner) return;
+    const anyLocked = locks.ranch || locks.pasture || locks.lot || locks.action;
+    if (!anyLocked) {
+        banner.style.display = 'none';
+        return;
+    }
+    const parts = [];
+    if (locks.ranch && propertyInput.value)        parts.push(propertyInput.value);
+    if (locks.pasture && pastureInput.value)       parts.push(pastureInput.value);
+    if (locks.lot && lotInput.value)               parts.push(`Lot ${lotInput.value}`);
+    if (locks.action && treatmentTypeInput.value)  parts.push(treatmentTypeInput.value);
+    banner.innerHTML = `<span class="chute-banner-icon">🔒</span> Chute mode: <b>${parts.length ? parts.join(' · ') : 'set fields, then they will stick'}</b>`;
+    banner.style.display = 'flex';
+}
+
+// =========================================================
+// CUSTOM NUMERIC KEYPAD — replaces iOS keyboard for tag entry
+// Avoids viewport-jump and predictive-text interference.
+// =========================================================
+const keypadModal = document.getElementById('keypadModal');
+const keypadDisplay = document.getElementById('keypadDisplay');
+let keypadBuffer = '';
+
+function openKeypad() {
+    keypadBuffer = tagNumberInput.value || '';
+    renderKeypadDisplay();
+    keypadModal.classList.add('show');
+}
+
+function closeKeypad() {
+    keypadModal.classList.remove('show');
+    // Commit final value and trigger the same input handler the form already uses
+    tagNumberInput.value = keypadBuffer;
+    tagNumberInput.dispatchEvent(new Event('input'));
+}
+window.closeKeypad = closeKeypad;
+
+function renderKeypadDisplay() {
+    keypadDisplay.textContent = keypadBuffer === '' ? '—' : keypadBuffer;
+    // Live-update underlying input + alert box so locks/lot/etc. respond as you type
+    tagNumberInput.value = keypadBuffer;
+    tagNumberInput.dispatchEvent(new Event('input'));
+}
+
+document.querySelectorAll('.keypad-key').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const k = btn.dataset.k;
+        if (navigator.vibrate) { try { navigator.vibrate(10); } catch(e){} }
+        if (k === 'clear') {
+            keypadBuffer = '';
+        } else if (k === 'back') {
+            keypadBuffer = keypadBuffer.slice(0, -1);
+        } else if (keypadBuffer.length < 8) {
+            keypadBuffer += k;
+        }
+        renderKeypadDisplay();
+    });
+});
+
+// Open the keypad when the user taps the tag input (input is readonly so the OS keyboard won't show)
+// On desktop / hardware-keyboard devices, leave the input editable and skip the keypad entirely.
+const isTouchPrimary = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+
+if (isTouchPrimary) {
+    tagNumberInput.addEventListener('focus', openKeypad);
+    tagNumberInput.addEventListener('click', openKeypad);
+} else {
+    // Desktop: allow typing directly. Drop readonly so keyboard input works.
+    tagNumberInput.removeAttribute('readonly');
+    tagNumberInput.placeholder = 'Type tag…';
+    tagNumberInput.setAttribute('inputmode', 'numeric');
+}
+
+// Backdrop tap closes the keypad
+keypadModal.addEventListener('click', (e) => {
+    if (e.target === keypadModal) closeKeypad();
+});
+
+// Keyboard shortcuts (desktop or with bluetooth keyboard)
+document.addEventListener('keydown', (e) => {
+    if (keypadModal.classList.contains('show')) {
+        if (e.key === 'Enter' || e.key === 'Escape') {
+            e.preventDefault();
+            closeKeypad();
+        }
+    }
+});
+
+// =========================================================
+// DITTO BUTTON — fills tag with the most recently saved tag
+// =========================================================
+const dittoTagBtn = document.getElementById('dittoTagBtn');
+if (dittoTagBtn) {
+    dittoTagBtn.addEventListener('click', () => {
+        // Last non-empty tag from records (records are sorted newest first)
+        const last = records.find(r => r.tagNumber && String(r.tagNumber).trim() !== '');
+        if (!last) {
+            showToast('No previous tag to copy', 'error', 1500);
+            return;
+        }
+        tagNumberInput.value = String(last.tagNumber);
+        tagNumberInput.dispatchEvent(new Event('input'));
+        showToast(`↺ Tag ${last.tagNumber}`, 'success', 1200);
+    });
+}
+
+// =========================================================
+// DAILY SUMMARY BAR — running tally for today + last save
+// =========================================================
+function updateDailySummary() {
+    const bar = document.getElementById('dailySummary');
+    if (!bar) return;
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const todays = records.filter(r => String(r.dateTime || '').startsWith(todayStr));
+    const todayMoves = movesRecords.filter(m => String(m.date || '').startsWith(todayStr));
+
+    if (todays.length === 0 && todayMoves.length === 0) {
+        bar.style.display = 'none';
+        return;
+    }
+
+    let firstPull = 0, secondPull = 0, dead = 0, other = 0;
+    todays.forEach(r => {
+        const t = String(r.treatmentType || '').toLowerCase();
+        if (t.includes('1st') || t.includes('first')) firstPull++;
+        else if (t.includes('2nd') || t.includes('second')) secondPull++;
+        else if (t.includes('dead')) dead++;
+        else other++;
+    });
+
+    // Find most recent save (records sorted newest first)
+    const last = todays[0];
+    let lastLine = '';
+    if (last) {
+        const tag = last.tagNumber || 'NT';
+        const time = String(last.dateTime || '').split('T')[1] || '';
+        const hhmm = time.slice(0, 5);
+        lastLine = `Last: Tag ${tag} at ${hhmm}`;
+    }
+
+    const parts = [];
+    if (firstPull) parts.push(`${firstPull} 1st`);
+    if (secondPull) parts.push(`${secondPull} 2nd`);
+    if (dead) parts.push(`<span style="color:#d70015;">${dead} dead</span>`);
+    if (other) parts.push(`${other} other`);
+    if (todayMoves.length) parts.push(`${todayMoves.length} move${todayMoves.length > 1 ? 's' : ''}`);
+
+    bar.innerHTML = `
+        <div class="ds-row ds-top">
+            <span class="ds-count">${todays.length}</span>
+            <span class="ds-label">treated today</span>
+        </div>
+        <div class="ds-row ds-mid">${parts.join(' · ')}</div>
+        ${lastLine ? `<div class="ds-row ds-last">${lastLine}</div>` : ''}
+    `;
+    bar.style.display = 'block';
+}
+
+// =========================================================
+// 3-TAB SWITCHING LOGIC
+// =========================================================
+function switchTab(tabName) {
+    doctoringTabBtn.classList.remove('active');
+    movesTabBtn.classList.remove('active');
+    historyTabBtn.classList.remove('active');
+    pastureTabBtn.classList.remove('active');
+    
+    doctoringForm.style.display = 'none';
+    movesForm.style.display = 'none';
+    historySection.style.display = 'none';
+    pastureSection.style.display = 'none';
+
+    if (tabName === 'doctoring') {
+        doctoringTabBtn.classList.add('active');
+        doctoringForm.style.display = 'block';
+    } 
+    else if (tabName === 'moves') {
+        movesTabBtn.classList.add('active');
+        movesForm.style.display = 'block';
+        populateMoveDropdowns();
+        if(!editingMoveId) document.getElementById('moveDate').valueAsDate = new Date();
+    } 
+    else if (tabName === 'pasture') {
+        pastureTabBtn.classList.add('active');
+        pastureSection.style.display = 'block';
+        openPastureView();
+    }
+    else if (tabName === 'history') {
+        historyTabBtn.classList.add('active');
+        historySection.style.display = 'block';
+        updateRecentList();
+        updateMovesList();
+        document.getElementById('searchInput').value = '';
+    }
+}
+
+doctoringTabBtn.onclick = () => switchTab('doctoring');
+movesTabBtn.onclick = () => switchTab('moves');
+historyTabBtn.onclick = () => switchTab('history');
+pastureTabBtn.onclick = () => switchTab('pasture');
+
+// =========================================================
+// DAILY AUTO-SYNC LOGIC
+// =========================================================
+// Bump whenever a release starts caching something new. A device that
+// synced under an older schema has a current betaLastSyncDate but is
+// missing the new data entirely, and would otherwise sit there looking
+// synced while tag lookups quietly returned nothing.
+const DATA_SCHEMA_VERSION = 7;
+
+function checkDailySync() {
+    const lastSync = localStorage.getItem('betaLastSyncDate');
+    const today = new Date().toISOString().split('T')[0];
+    const storedSchema = parseInt(localStorage.getItem('betaCattleDataVersion'), 10);
+
+    // Everything the doctoring form needs before it can answer a tag.
+    // Checking only records/locsDatabase was the gap: those survive from an
+    // older build while the tag maps do not exist at all.
+    const missingData =
+        locsDatabase.length === 0 ||
+        lotsDatabase.length === 0 ||
+        Object.keys(tagLotMap).length === 0 ||
+        tagRanges.length === 0;
+
+    if (missingData || storedSchema !== DATA_SCHEMA_VERSION || lastSync !== today) {
+        syncCloudBtn.innerText = "⏳ Auto-Syncing Daily Data...";
+        pullCloudData();
+    }
+}
+
+// =========================================================
+// MOVES FORM LOGIC (ADD / EDIT)
+// =========================================================
+// =========================================================
+// PASTURE INVENTORY — ONE PASTURE AT A TIME
+//
+// What the books say is standing in a pasture, so a cowboy at a gate knows
+// whether he has them all. Reads pastureLotsMap, the same cache the move
+// form's split is built from, so it works with no signal.
+//
+// Deliberately NOT a yard sheet. You have to name the ranch and then the
+// pasture before anything appears; there is no all-pastures list, no ranch
+// subtotal and no way to reach an operation-wide number. John's reason
+// (2026-09-02): a phone gets left on a truck seat, and a whole-ranch total
+// one tap from the home screen is not something to hand out. The selection
+// also RESETS every time the tab is opened rather than being remembered —
+// leaving the last pasture on screen would defeat the same point.
+//
+// If layers of authorization arrive later, this screen is already the shape
+// they would want: it shows one pasture and nothing aggregate.
+// The pickers are built from what is STANDING somewhere, not from the
+// pasture list. An empty pasture is not a place you go to count or weigh
+// cattle, and on a ranch with sixty pastures most of them are empty most of
+// the time — offering them all buries the handful that matter.
+//
+// pastureLotsMap is keyed "Ranch - Pasture". Splitting on " - " is safe: no
+// ranch or pasture name contains a dash, which the office's own location
+// parsing already depends on.
+function pvStocked() {
+    const byRanch = {};
+    Object.keys(pastureLotsMap || {}).forEach(key => {
+        const head = (pastureLotsMap[key] || []).reduce((t, x) => t + (Number(x.head) || 0), 0);
+        if (head <= 0) return;
+        const i = key.indexOf(' - ');
+        if (i < 0) return;
+        const ranch = key.slice(0, i).trim();
+        const past = key.slice(i + 3).trim();
+        if (!ranch || !past) return;
+        (byRanch[ranch] = byRanch[ranch] || []).push(past);
+    });
+    Object.keys(byRanch).forEach(r => {
+        byRanch[r] = [...new Set(byRanch[r])].sort();
+    });
+    return byRanch;
+}
+
+function openPastureView() {
+    const ranchSel = document.getElementById('pvRanch');
+    const pastSel = document.getElementById('pvPasture');
+    if (!ranchSel || !pastSel) return;
+
+    const stocked = pvStocked();
+    const props = Object.keys(stocked).sort();
+    ranchSel.innerHTML = props.length
+        ? '<option value="">Select Ranch...</option>'
+            + props.map(p => `<option value="${p}">${p}</option>`).join('')
+        : '<option value="">No cattle on the books — sync first</option>';
+    ranchSel.value = '';
+    ranchSel.disabled = props.length === 0;
+    pastSel.innerHTML = '<option value="">Select Ranch first...</option>';
+    pastSel.disabled = true;
+    pvShowForm(null);
+    renderPastureView();
+}
+
+function pvPastureOptions(ranch) {
+    const pastures = pvStocked()[String(ranch).trim()] || [];
+    return '<option value="">Select Pasture...</option>'
+        + pastures.map(p => `<option value="${p}">${p}</option>`).join('');
+}
+
+function renderPastureView() {
+    const box = document.getElementById('pvResult');
+    if (!box) return;
+    const ranch = String(document.getElementById('pvRanch').value || '').trim();
+    const past = String(document.getElementById('pvPasture').value || '').trim();
+
+    const actions = document.getElementById('pvActions');
+    if (!ranch || !past) {
+        box.innerHTML = '<div class="pv-hint">Pick a ranch and a pasture to see what is in it.</div>';
+        if (actions) actions.style.display = 'none';
+        pvShowForm(null);
+        if (actions) actions.style.display = 'none';
+        return;
+    }
+    // Counting and weighing are things you do TO a pasture, so they only
+    // appear once one is named — same gate as the inventory itself.
+    if (actions) actions.style.display = 'block';
+
+    const here = pastureLotsMap[`${ranch} - ${past}`] || [];
+    const total = here.reduce((t, x) => t + (Number(x.head) || 0), 0);
+    const synced = localStorage.getItem('betaLastSyncDate');
+
+    if (!here.length) {
+        box.innerHTML = `<div class="pv-card">
+            <div class="pv-head"><span>${ranch} &ndash; ${past}</span><span class="pv-total">empty</span></div>
+            <div class="pv-hint">The books show no cattle in this pasture.</div>
+            ${synced ? `<div class="pv-asof">As of the last sync, ${synced}.</div>` : ''}
+        </div>`;
+        return;
+    }
+
+    box.innerHTML = `<div class="pv-card">
+        <div class="pv-head">
+            <span>${ranch} &ndash; ${past}</span>
+            <span class="pv-total">${total} hd</span>
+        </div>
+        ${here.slice().sort((a, b) => b.head - a.head).map(x => `
+            <div class="pv-row">
+                <span class="pv-lot">${x.lot}</span>
+                <span class="pv-hd">${x.head}</span>
+            </div>`).join('')}
+        ${here.length > 1
+            ? `<div class="pv-note">${here.length} lots run together here. The split between them is the books&rsquo; estimate.</div>`
+            : ''}
+        ${synced ? `<div class="pv-asof">As of the last sync, ${synced}. Pull Cloud on the History tab to refresh.</div>` : ''}
+    </div>`;
+}
+
+document.getElementById('pvRanch').onchange = function() {
+    const pastSel = document.getElementById('pvPasture');
+    pastSel.disabled = !this.value;
+    pastSel.innerHTML = this.value
+        ? pvPastureOptions(this.value)
+        : '<option value="">Select Ranch first...</option>';
+    renderPastureView();
+};
+document.getElementById('pvPasture').onchange = renderPastureView;
+
+// =========================================================
+// PASTURE COUNT AND TEST WEIGHTS
+//
+// Both are recorded against the PASTURE, not a lot. On a mixed pasture the
+// cowboy cannot say which lot an animal belongs to — that is the whole
+// premise of the pro-rata split — so he is not asked. The office assigns the
+// lot at approval, where it can also ask about mixed lots.
+//
+// Shrink here is INDICATIVE only, so the figure in his hand is realistic
+// while he works. The true factor is set by the office at approval and is
+// what gets stored. Defaults are John's: 3% weighed on the ground, 2% hauled
+// and weighed — hauled cattle have already shrunk on the trailer.
+const SHRINK_DEFAULTS = { ground: 3, hauled: 2 };
+
+function pvWhere() {
+    const ranch = String(document.getElementById('pvRanch').value || '').trim();
+    const past = String(document.getElementById('pvPasture').value || '').trim();
+    return { ranch, past, label: ranch && past ? `${ranch} - ${past}` : '' };
+}
+
+function pvShowForm(which) {
+    const count = document.getElementById('pvCountForm');
+    const weigh = document.getElementById('pvWeighForm');
+    const actions = document.getElementById('pvActions');
+    count.style.display = which === 'count' ? 'block' : 'none';
+    weigh.style.display = which === 'weigh' ? 'block' : 'none';
+    actions.style.display = which ? 'none' : 'block';
+    if (!which) return;
+    const { label } = pvWhere();
+    document.querySelectorAll('.pv-form-where').forEach(el => { el.textContent = label; });
+}
+
+// ---- count ----------------------------------------------------------
+function pvOpenCount() {
+    document.getElementById('pvCountHead').value = '';
+    document.getElementById('pvCountNotes').value = '';
+    document.getElementById('pvCountDate').valueAsDate = new Date();
+    pvShowForm('count');
+    pvCompareCount();
+}
+
+// Say straight away whether the count ties, because a gap is a different
+// problem from a bad split: it means a death, sale or move nobody recorded,
+// and the office cannot settle the pasture until that is found.
+function pvCompareCount() {
+    const el = document.getElementById('pvCountCompare');
+    const { label } = pvWhere();
+    const here = pastureLotsMap[label] || [];
+    const book = here.reduce((t, x) => t + (Number(x.head) || 0), 0);
+    const v = document.getElementById('pvCountHead').value;
+    const counted = v === '' ? null : parseInt(v, 10);
+    if (counted == null || isNaN(counted)) {
+        el.className = 'pv-compare';
+        el.textContent = `Books show ${book} head here.`;
+        return;
+    }
+    const diff = counted - book;
+    if (diff === 0) {
+        el.className = 'pv-compare ok';
+        el.textContent = `Ties with the books (${book} head).`;
+    } else {
+        el.className = 'pv-compare bad';
+        el.textContent = `Books show ${book}. That is ${Math.abs(diff)} ${diff > 0 ? 'more' : 'short'} — ` +
+                         `send it anyway and the office will work out why.`;
+    }
+}
+
+function pvSaveCount() {
+    const { ranch, past, label } = pvWhere();
+    const v = document.getElementById('pvCountHead').value;
+    const counted = v === '' ? null : parseInt(v, 10);
+    if (counted == null || isNaN(counted) || counted < 0) {
+        showToast('🛑 Enter the head you counted', 'error', 3000);
+        return;
+    }
+    if (!recordedByInput.value.trim()) {
+        showToast('🛑 Put your name in on the Doctoring tab first', 'error', 3500);
+        return;
+    }
+    const here = pastureLotsMap[label] || [];
+    const book = here.reduce((t, x) => t + (Number(x.head) || 0), 0);
+    if (!confirm(`Send count?\n${label}\nCounted ${counted} head (books say ${book}).`)) return;
+
+    const rec = {
+        type: 'count',
+        id: 'C-' + Date.now(),
+        date: document.getElementById('pvCountDate').value,
+        ranch, pasture: past,
+        countedHead: String(counted),
+        bookHead: String(book),
+        lots: here.map(x => ({ lot: x.lot, head: x.head })),
+        notes: document.getElementById('pvCountNotes').value.trim(),
+        recordedBy: recordedByInput.value.trim()
+    };
+    pushToCloud(rec);
+    showToast(`🔢 Count sent: ${label}, ${counted} hd`, 'success', 2500);
+    pvShowForm(null);
+}
+
+// ---- test weights ---------------------------------------------------
+function pvOpenWeigh() {
+    document.getElementById('pvWeighNotes').value = '';
+    document.getElementById('pvWeighDate').valueAsDate = new Date();
+    document.getElementById('pvWeighMethod').value = 'ground';
+    document.getElementById('pvDrafts').innerHTML = '';
+    pvAddDraftRow();
+    pvShowForm('weigh');
+}
+
+function pvAddDraftRow() {
+    const box = document.getElementById('pvDrafts');
+    const n = box.querySelectorAll('.pv-draft').length + 1;
+    const row = document.createElement('div');
+    row.className = 'lot-split-row pv-draft';
+    row.innerHTML = `
+        <span class="lot-split-name">Draft ${n}</span>
+        <input type="number" class="pv-draft-head" min="1" step="1" inputmode="numeric"
+               placeholder="hd" style="width:70px; text-align:right;">
+        <input type="number" class="pv-draft-lb" min="1" step="1" inputmode="numeric"
+               placeholder="lb total" style="width:100px; text-align:right;">
+        <button type="button" class="pv-draft-x" title="Remove this draft">&times;</button>`;
+    box.appendChild(row);
+    row.querySelectorAll('input').forEach(el => el.addEventListener('input', pvWeighTotals));
+    row.querySelector('.pv-draft-x').addEventListener('click', () => {
+        row.remove();
+        // Renumber so the labels match what is on screen.
+        [...box.querySelectorAll('.pv-draft')].forEach((r, i) => {
+            r.querySelector('.lot-split-name').textContent = `Draft ${i + 1}`;
+        });
+        pvWeighTotals();
+    });
+    pvWeighTotals();
+}
+
+function pvDraftValues() {
+    return [...document.querySelectorAll('.pv-draft')].map(r => ({
+        head: parseInt(r.querySelector('.pv-draft-head').value, 10) || 0,
+        grossLb: parseFloat(r.querySelector('.pv-draft-lb').value) || 0
+    })).filter(d => d.head > 0 && d.grossLb > 0);
+}
+
+// A weighing counts as the pasture's weight once it covers 25% of the head
+// on the books there (John, 2026-10-01); below that the office keeps it as a
+// note. Say the number at the scale, while there is still time to run more
+// across.
+const PV_MIN_SHARE = 0.25;
+
+function pvWeighNeed() {
+    const { label } = pvWhere();
+    const here = pastureLotsMap[label] || [];
+    const book = here.reduce((t, x) => t + (Number(x.head) || 0), 0);
+    return { book, need: Math.ceil(PV_MIN_SHARE * book) };
+}
+
+function pvWeighTotals() {
+    const el = document.getElementById('pvWeighTotals');
+    const drafts = pvDraftValues();
+    const head = drafts.reduce((t, d) => t + d.head, 0);
+    const lb = drafts.reduce((t, d) => t + d.grossLb, 0);
+    const { book, need } = pvWeighNeed();
+    const needLine = !book ? ''
+        : head >= need
+            ? `<div class="pv-compare ok">${head} of ${book} head — enough to count as this pasture's weight (${need} needed).</div>`
+            : `<div class="pv-compare${head ? ' bad' : ''}">Weigh at least ${need} of the ${book} head here (25%) for this to count as the pasture's weight${head ? ` — ${need - head} more` : ''}.</div>`;
+    if (!head || !lb) { el.innerHTML = needLine; return; }
+    const method = document.getElementById('pvWeighMethod').value;
+    const pct = SHRINK_DEFAULTS[method] || 0;
+    const grossAvg = lb / head;
+    const shrunkAvg = grossAvg * (1 - pct / 100);
+    el.innerHTML = `
+        <div class="pv-tot-row"><span>${head} head weighed</span><span>${Math.round(lb).toLocaleString()} lb gross</span></div>
+        <div class="pv-tot-row"><span>Gross average</span><span><b>${grossAvg.toFixed(1)} lb</b></span></div>
+        <div class="pv-tot-row muted-row"><span>Less ${pct}% shrink</span><span><b>${shrunkAvg.toFixed(1)} lb</b></span></div>
+        <div class="pv-tot-note">The office sets the true shrink when this is approved.</div>
+        ${needLine}`;
+}
+
+function pvSaveWeigh() {
+    const { ranch, past, label } = pvWhere();
+    const drafts = pvDraftValues();
+    if (!drafts.length) {
+        showToast('🛑 Enter at least one draft — head and total pounds', 'error', 3500);
+        return;
+    }
+    if (!recordedByInput.value.trim()) {
+        showToast('🛑 Put your name in on the Doctoring tab first', 'error', 3500);
+        return;
+    }
+    const head = drafts.reduce((t, d) => t + d.head, 0);
+    const lb = drafts.reduce((t, d) => t + d.grossLb, 0);
+    const method = document.getElementById('pvWeighMethod').value;
+    const pct = SHRINK_DEFAULTS[method] || 0;
+    if (!confirm(`Send test weights?\n${label}\n${drafts.length} draft${drafts.length === 1 ? '' : 's'}, ` +
+                 `${head} head, ${Math.round(lb).toLocaleString()} lb gross\n` +
+                 `${(lb / head).toFixed(1)} lb gross average` +
+                 (() => { const { book, need } = pvWeighNeed();
+                          return book && head < need
+                              ? `\n\nUnder ${need} head (25% of ${book}): the office keeps it as a note, not the pasture's weight.`
+                              : ''; })())) return;
+
+    const rec = {
+        type: 'weight',
+        id: 'W-' + Date.now(),
+        date: document.getElementById('pvWeighDate').value,
+        ranch, pasture: past,
+        method,
+        suggestedShrinkPct: String(pct),
+        drafts: drafts.map((d, i) => ({ draft: i + 1, head: d.head, grossLb: d.grossLb })),
+        totalHead: String(head),
+        totalGrossLb: String(lb),
+        lots: (pastureLotsMap[label] || []).map(x => ({ lot: x.lot, head: x.head })),
+        notes: document.getElementById('pvWeighNotes').value.trim(),
+        recordedBy: recordedByInput.value.trim()
+    };
+    pushToCloud(rec);
+    showToast(`⚖️ Weights sent: ${head} hd, ${(lb / head).toFixed(0)} lb avg`, 'success', 2500);
+    pvShowForm(null);
+}
+
+document.getElementById('pvCountBtn').onclick = pvOpenCount;
+document.getElementById('pvWeighBtn').onclick = pvOpenWeigh;
+document.getElementById('pvCountCancel').onclick = () => pvShowForm(null);
+document.getElementById('pvWeighCancel').onclick = () => pvShowForm(null);
+document.getElementById('pvCountSave').onclick = pvSaveCount;
+document.getElementById('pvWeighSave').onclick = pvSaveWeigh;
+document.getElementById('pvCountHead').addEventListener('input', pvCompareCount);
+document.getElementById('pvAddDraft').onclick = pvAddDraftRow;
+document.getElementById('pvWeighMethod').onchange = pvWeighTotals;
+
+function populateMoveDropdowns() {
+    const fromRanch = document.getElementById('moveFromRanch');
+    const toRanch = document.getElementById('moveToRanch');
+    const validLocs = locsDatabase.filter(l => l && l.property);
+    const uniqueProps = [...new Set(validLocs.map(l => String(l.property).trim()))].sort();
+    const optionsHtml = '<option value="" disabled selected>Select Ranch...</option>'
+        + uniqueProps.map(p => `<option value="${p}">${p}</option>`).join('');
+    
+    [fromRanch, toRanch].forEach(select => {
+        const currentVal = select.value;
+        select.innerHTML = optionsHtml;
+        select.value = currentVal;
+    });
+}
+
+function updateMovePastures(prop, targetId) {
+    const target = document.getElementById(targetId);
+    target.disabled = false;
+    
+    if (!prop) {
+        target.innerHTML = '<option value="" disabled selected>Select Pasture...</option>';
+        return;
+    }
+
+    const pastures = locsDatabase
+        .filter(l => l.property && String(l.property).trim() === String(prop).trim())
+        .map(l => String(l.pasture).trim())
+        .sort();
+        
+    const uniquePastures = [...new Set(pastures)];
+    target.innerHTML = '<option value="" disabled selected>Select Pasture...</option>'
+        + uniquePastures.map(p => `<option value="${p}">${p}</option>`).join('');
+}
+
+document.getElementById('moveFromRanch').onchange = function() {
+    updateMovePastures(this.value, 'moveFromPasture');
+    moveSplitTouched = false;      // a new pasture means new lots; start clean
+    renderMoveSplit();
+};
+document.getElementById('moveToRanch').onchange = function() { updateMovePastures(this.value, 'moveToPasture'); };
+document.getElementById('moveFromPasture').onchange = function() {
+    moveSplitTouched = false;
+    renderMoveSplit();
+};
+// Typing the head count re-spreads it, until somebody edits a lot box by hand.
+document.getElementById('moveHeadCount').addEventListener('input', () => {
+    autoFillMoveSplit();
+    updateMoveSplitTotal();
+});
+
+// WHICH LOTS ARE MOVING
+//
+// lot_movements.lot_id is NOT NULL, so a move has to name a lot. Four
+// pastures currently hold more than one lot - Steele/Front Native carries
+// 416 head as 37X:241 and 37X-F:175 - and once cattle are mixed, cutting 50
+// off the gate gives nobody a way to tell how many of each went. So the
+// form asks for a SPLIT rather than a single lot.
+//
+// The default is pro-rata on what the books say is standing there, which is
+// the best available guess for a random cut and always sums exactly (largest
+// remainder). It is a starting point, not an answer: any box can be typed
+// over when the cowboy actually knows.
+//
+// This is safe to estimate because a move does not touch the money. Head-days
+// come from lot_daily_head, which is built from invoices, receipts, deaths
+// and sales and never reads a pasture - so cost of gain, feed, treatment and
+// closeout are all identical whichever way the split falls. What it does
+// decide is which pasture each lot's head are recorded in, and that matters
+// later: when those cattle are SOLD off the far pasture, the sale allocates
+// to whatever lot the books say is standing there.
+let moveSplitTouched = false;
+
+function moveLotsHere() {
+    const ranch = String(document.getElementById('moveFromRanch').value || '').trim();
+    const past = String(document.getElementById('moveFromPasture').value || '').trim();
+    const label = ranch && past ? `${ranch} - ${past}` : '';
+    return { label, past, here: (label && pastureLotsMap[label]) || [] };
+}
+
+// Largest remainder, so the parts always sum to the whole exactly. Rounding
+// each share independently and dumping the residual on the last lot would
+// work too, but always parks the error on whichever lot happens to be last.
+function proRata(total, weights) {
+    const sum = weights.reduce((a, b) => a + b, 0);
+    if (!sum || !total) return weights.map(() => 0);
+    const exact = weights.map(w => (total * w) / sum);
+    const base = exact.map(Math.floor);
+    let short = total - base.reduce((a, b) => a + b, 0);
+    const order = exact.map((e, i) => ({ i, frac: e - Math.floor(e) }))
+                       .sort((a, b) => b.frac - a.frac);
+    for (let k = 0; k < order.length && short > 0; k++, short--) base[order[k].i]++;
+    return base;
+}
+
+function renderMoveSplit(preset) {
+    const box = document.getElementById('moveLotSplit');
+    const hint = document.getElementById('moveLotHint');
+    if (!box) return;
+    const { label, past, here } = moveLotsHere();
+
+    if (!label) {
+        box.innerHTML = '<div class="muted">Pick the From ranch and pasture first.</div>';
+        hint.style.display = 'none';
+        return;
+    }
+    if (here.length === 0) {
+        // The books show nothing standing there. Not a blocker - the cattle
+        // are real and the move happened - but the office must be told.
+        box.innerHTML = '<div class="muted">The books show no open lot in this pasture. Save anyway; the office will sort it out.</div>';
+        hint.style.display = 'none';
+        return;
+    }
+    box.innerHTML = here.map((x, i) => `
+        <div class="lot-split-row">
+            <span class="lot-split-name">${x.lot}<small class="muted"> ${x.head} hd here</small></span>
+            <input type="number" class="lot-split-head" data-lot="${x.lot}" data-avail="${x.head}"
+                   min="0" max="${x.head}" step="1" inputmode="numeric" placeholder="0"
+                   value="${preset && preset[x.lot] != null ? preset[x.lot] : ''}">
+        </div>`).join('') + '<div class="lot-split-total" id="moveSplitTotal"></div>';
+
+    box.querySelectorAll('.lot-split-head').forEach(el => {
+        el.addEventListener('input', () => { moveSplitTouched = true; updateMoveSplitTotal(); });
+    });
+
+    hint.textContent = here.length === 1
+        ? `Only lot in ${past}.`
+        : `${here.length} lots are mixed in ${past} — split the head between them.`;
+    hint.style.display = 'block';
+    if (!preset) autoFillMoveSplit();
+    updateMoveSplitTotal();
+}
+
+// Fill the boxes from the head count: the whole lot when there is only one,
+// pro-rata when they are mixed. Never overwrites what somebody typed.
+function autoFillMoveSplit() {
+    if (moveSplitTouched) return;
+    const total = parseInt(document.getElementById('moveHeadCount').value, 10);
+    const rows = [...document.querySelectorAll('.lot-split-head')];
+    if (!rows.length) return;
+    if (isNaN(total) || total <= 0) { rows.forEach(r => { r.value = ''; }); updateMoveSplitTotal(); return; }
+    if (rows.length === 1) { rows[0].value = total; updateMoveSplitTotal(); return; }
+    const share = proRata(total, rows.map(r => Number(r.dataset.avail) || 0));
+    rows.forEach((r, i) => { r.value = share[i] || 0; });
+    updateMoveSplitTotal();
+}
+
+function moveSplitValues() {
+    return [...document.querySelectorAll('.lot-split-head')].map(el => ({
+        lot: el.dataset.lot,
+        avail: Number(el.dataset.avail) || 0,
+        head: parseInt(el.value, 10) || 0
+    }));
+}
+
+function updateMoveSplitTotal() {
+    const el = document.getElementById('moveSplitTotal');
+    if (!el) return;
+    const vals = moveSplitValues();
+    const sum = vals.reduce((a, b) => a + b.head, 0);
+    const stated = parseInt(document.getElementById('moveHeadCount').value, 10);
+    const over = vals.filter(v => v.head > v.avail);
+    if (over.length) {
+        el.className = 'lot-split-total bad';
+        el.textContent = over.map(v => `Only ${v.avail} head of ${v.lot} are in this pasture`).join(' · ');
+        return;
+    }
+    if (!isNaN(stated) && stated > 0 && sum !== stated) {
+        el.className = 'lot-split-total bad';
+        el.textContent = `${sum} of ${stated} head allocated — ${sum < stated ? (stated - sum) + ' short' : (sum - stated) + ' over'}`;
+        return;
+    }
+    el.className = 'lot-split-total ok';
+    el.textContent = sum > 0 ? `${sum} head allocated` : '';
+}
+
+// Kept for the edit path: restore a saved split, or a single saved lot.
+function refreshMoveLots(saved) {
+    moveSplitTouched = !!saved;
+    renderMoveSplit(saved || null);
+}
+
+movesForm.addEventListener('submit', function(e) {
+    e.preventDefault();
+
+    if (isSubmittingMove) return;
+    
+    const count = document.getElementById('moveHeadCount').value;
+    const fromR = document.getElementById('moveFromRanch').value;
+    const fromP = document.getElementById('moveFromPasture').value;
+    const toR = document.getElementById('moveToRanch').value;
+    const toP = document.getElementById('moveToPasture').value;
+
+    if (fromR === toR && fromP === toP) {
+        showToast("🛑 From/To pastures are the same", 'error', 3000);
+        return; 
+    }
+
+    // Only insist on lots when the books actually offer a choice. If they
+    // show nothing standing in that pasture there is nothing to pick, and
+    // blocking the save would strand a real move on the phone.
+    const here = pastureLotsMap[`${String(fromR).trim()} - ${String(fromP).trim()}`] || [];
+    const split = moveSplitValues().filter(v => v.head > 0);
+    const splitSum = split.reduce((a, b) => a + b.head, 0);
+    if (here.length > 0) {
+        if (!split.length) {
+            showToast('🛑 Say how many head of each lot are moving', 'error', 3500);
+            return;
+        }
+        const over = split.find(v => v.head > v.avail);
+        if (over) {
+            showToast(`🛑 Only ${over.avail} head of ${over.lot} are in this pasture`, 'error', 4000);
+            return;
+        }
+        // The stated head and the split must agree, or the office receives a
+        // move whose parts do not add up to its own total.
+        const stated = parseInt(count, 10);
+        if (!isNaN(stated) && stated > 0 && stated !== splitSum) {
+            showToast(`🛑 Lots add to ${splitSum}, head count says ${stated}`, 'error', 4000);
+            return;
+        }
+    }
+    const lotVal = split.length === 1 ? split[0].lot : '';
+
+    const moveData = {
+        type: 'move',
+        id: editingMoveId || "M-" + Date.now(),
+        date: document.getElementById('moveDate').value,
+        fromRanch: fromR,
+        fromPasture: fromP,
+        toRanch: toR,
+        toPasture: toP,
+        // lotNumber stays set for the ordinary one-lot move so the office
+        // path and every older record keep working unchanged; lotSplit is
+        // the general form and wins when present.
+        lotNumber: lotVal,
+        lotSplit: split.map(v => ({ lot: v.lot, head: v.head })),
+        headCount: String(splitSum || parseInt(count, 10) || 0),
+        notes: document.getElementById('moveNotes').value,
+        recordedBy: moveRecordedByInput.value.trim()
+    };
+
+    const countMsg = splitSum ? `${splitSum} Head` : (count ? `${count} Head` : "Uncounted Head");
+    const splitMsg = split.length ? split.map(v => `${v.lot}: ${v.head}`).join('\n') + '\n' : '';
+    if(!confirm(`Confirm Move:\n${splitMsg}${countMsg}\nFrom: ${fromP}\nTo: ${toP}`)) return;
+
+    const saveMoveBtn = document.getElementById('saveMoveBtn');
+    isSubmittingMove = true;
+    saveMoveBtn.disabled = true;
+    saveMoveBtn.style.opacity = '0.6';
+
+    if (editingMoveId) {
+        movesRecords = movesRecords.map(m => String(m.id) === String(editingMoveId) ? moveData : m);
+        editingMoveId = null;
+        saveMoveBtn.innerText = "Save Move";
+        saveMoveBtn.style.backgroundColor = "#5856d6";
+    } else {
+        movesRecords.unshift(moveData);
+    }
+
+    safeSetItem('betaCattleMoves', JSON.stringify(movesRecords));
+    safeSetItem('crewMemberName', moveRecordedByInput.value.trim());
+
+    pushToCloud(moveData);
+    showToast(`🚚 Move saved: ${fromP} → ${toP}`, 'success', 2000);
+    updateDailySummary();
+    movesForm.reset();
+    // reset() leaves the split rows holding lots for a pasture that is no
+    // longer selected; rebuild from the (now empty) form.
+    moveSplitTouched = false;
+    renderMoveSplit();
+    document.getElementById('moveDate').valueAsDate = new Date();
+    moveRecordedByInput.value = localStorage.getItem('crewMemberName'); 
+
+    setTimeout(() => {
+        isSubmittingMove = false;
+        saveMoveBtn.disabled = false;
+        saveMoveBtn.style.opacity = '1';
+    }, 600);
+});
+
+window.editMoveLocal = function(id) {
+    const m = movesRecords.find(rec => String(rec.id) === String(id));
+    if (!m) return;
+    // An approved entry is already in the books and its raw payload is
+    // immutable server-side, so a re-send would be refused. Say so here
+    // rather than letting the cowboy retype it into a rejection.
+    if (m._status === 'approved') {
+        showToast('Already approved and in the books — ask the office to change it', 'error', 4000);
+        return;
+    }
+
+    editingMoveId = String(id);
+    switchTab('moves'); 
+    
+    document.getElementById('moveDate').value = m.date ? String(m.date).split('T')[0] : '';
+    
+    if (m.fromRanch) {
+        document.getElementById('moveFromRanch').value = String(m.fromRanch).trim();
+        updateMovePastures(String(m.fromRanch).trim(), 'moveFromPasture');
+        document.getElementById('moveFromPasture').value = String(m.fromPasture).trim();
+    }
+    
+    if (m.toRanch) {
+        document.getElementById('moveToRanch').value = String(m.toRanch).trim();
+        updateMovePastures(String(m.toRanch).trim(), 'moveToPasture');
+        document.getElementById('moveToPasture').value = String(m.toPasture).trim();
+    }
+    
+    // Rebuild the split for the loaded from-pasture, restoring what was
+    // recorded. An older record carries a single lotNumber and no split.
+    const saved = {};
+    if (Array.isArray(m.lotSplit) && m.lotSplit.length) {
+        m.lotSplit.forEach(x => { saved[x.lot] = x.head; });
+    } else if (m.lotNumber) {
+        saved[String(m.lotNumber).trim()] = parseInt(m.headCount, 10) || 0;
+    }
+    refreshMoveLots(Object.keys(saved).length ? saved : null);
+
+    document.getElementById('moveHeadCount').value = m.headCount || "";
+    document.getElementById('moveNotes').value = m.notes || "";
+    
+    document.getElementById('saveMoveBtn').innerText = "Update Move Record";
+    document.getElementById('saveMoveBtn').style.backgroundColor = "#ffcc00"; 
+    
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+
+// =========================================================
+// UNIVERSAL DELETE LOGIC
+// =========================================================
+window.confirmDelete = function(id, type) {
+    const stringId = String(id);
+    const delBtn = document.getElementById(`del-${stringId}`);
+    if (!delBtn) return;
+
+    // If confirm UI is already showing for this row, ignore further Del taps
+    if (delBtn.dataset.confirming === '1') return;
+
+    const actionCell = delBtn.parentElement;
+    delBtn.dataset.confirming = '1';
+    delBtn.style.display = 'none';
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'delete-btn delete-confirm-btn';
+    confirmBtn.textContent = '✓ Delete';
+    confirmBtn.id = `confirm-${stringId}`;
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'edit-btn delete-cancel-btn';
+    cancelBtn.textContent = '✕';
+    cancelBtn.id = `cancel-${stringId}`;
+
+    const cleanup = () => {
+        if (deleteTimers[stringId]) {
+            clearTimeout(deleteTimers[stringId]);
+            delete deleteTimers[stringId];
+        }
+        if (confirmBtn.parentElement) confirmBtn.remove();
+        if (cancelBtn.parentElement) cancelBtn.remove();
+        delBtn.style.display = '';
+        delBtn.dataset.confirming = '0';
+    };
+
+    confirmBtn.onclick = () => {
+        cleanup();
+
+        // Tombstone so a future cloud pull doesn't resurrect this record
+        tombstones[stringId] = Date.now();
+        saveTombstones();
+
+        if (type === 'move') {
+            movesRecords = movesRecords.filter(m => String(m.id) !== stringId);
+            safeSetItem('betaCattleMoves', JSON.stringify(movesRecords));
+            updateMovesList();
+        } else {
+            records = records.filter(r => String(r.id) !== stringId);
+            safeSetItem('betaCattleRecords', JSON.stringify(records));
+            updateRecentList();
+        }
+
+        pushToCloud({ action: 'delete', id: stringId, type: type });
+        showToast('🗑 Deleted', 'success', 1500);
+        updateDailySummary();
+    };
+
+    cancelBtn.onclick = cleanup;
+
+    actionCell.appendChild(confirmBtn);
+    actionCell.appendChild(cancelBtn);
+
+    // Auto-cancel after 5 seconds
+    deleteTimers[stringId] = setTimeout(cleanup, 5000);
+};
+
+// =========================================================
+// CORE DOCTORING UTILITIES
+// =========================================================
+clearTagBtn.onclick = () => {
+    tagNumberInput.value = '';
+    tagNumberInput.dispatchEvent(new Event('input'));
+    // Don't refocus — that reopens the keypad and surprises the user.
+    // Tapping the field again is one tap and intentional.
+};
+
+noTagBtn.onclick = () => {
+    let maxNt = 0;
+    records.forEach(r => {
+        const tag = String(r.tagNumber).toUpperCase();
+        if (tag.startsWith('NT')) {
+            const num = parseInt(tag.replace('NT', ''), 10);
+            if (!isNaN(num) && num > maxNt) maxNt = num;
+        }
+    });
+    tagNumberInput.value = `NT${maxNt + 1}`;
+    tagNumberInput.dispatchEvent(new Event('input'));
+};
+
+window.processCloudData = function(data) {
+    try {
+        if (data && Array.isArray(data.records)) {
+            const cloudRecords = data.records || [];
+            const cloudMoves = data.moves || [];
+
+            // IDs that are still queued for upload — never drop these from local view
+            const queuedIds = new Set(syncQueue.map(q => String(q.id)));
+            const cloudRecordIds = new Set(cloudRecords.map(r => String(r.id)));
+            const cloudMoveIds = new Set(cloudMoves.map(m => String(m.id)));
+
+            // Keep local records that haven't made it to cloud yet (still in queue)
+            const localPendingRecords = records.filter(r =>
+                queuedIds.has(String(r.id)) && !cloudRecordIds.has(String(r.id))
+            );
+            const localPendingMoves = movesRecords.filter(m =>
+                queuedIds.has(String(m.id)) && !cloudMoveIds.has(String(m.id))
+            );
+
+            // Honor tombstones — records the user deleted locally should not reappear from cloud
+            const filteredCloudRecords = cloudRecords.filter(r => !tombstones[String(r.id)]);
+            const filteredCloudMoves = cloudMoves.filter(m => !tombstones[String(m.id)]);
+
+            records = [...filteredCloudRecords, ...localPendingRecords]
+                .sort((a, b) => new Date(b.dateTime) - new Date(a.dateTime));
+            movesRecords = [...filteredCloudMoves, ...localPendingMoves]
+                .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+            medsDatabase = data.medications || []; 
+            locsDatabase = data.locations || []; 
+            lotsDatabase = data.lots || []; 
+            protocolsDatabase = data.protocols || []; 
+            
+            safeSetItem('betaCattleRecords', JSON.stringify(records));
+            safeSetItem('betaCattleMoves', JSON.stringify(movesRecords));
+            safeSetItem('betaCattleMeds', JSON.stringify(medsDatabase));
+            safeSetItem('betaCattleLocs', JSON.stringify(locsDatabase));
+            safeSetItem('betaCattleLots', JSON.stringify(lotsDatabase));
+            safeSetItem('betaCattleProtocols', JSON.stringify(protocolsDatabase));
+            
+            // Only stamp the device as up to date when the lookups the
+            // doctoring form depends on actually arrived. The comment here
+            // used to claim a partial pull could not mark the device current,
+            // but nothing enforced it: the degrade-rather-than-die path above
+            // reports a failed query and carries on, so a device that had
+            // lost its tag maps was still stamped fresh and would not
+            // re-sync on its own.
+            // Absent (a caller that predates this flag) counts as complete,
+            // so an unrelated path cannot strand a device as never-synced.
+            if (data.lookupsComplete !== false) {
+                safeSetItem('betaLastSyncDate', new Date().toISOString().split('T')[0]);
+                safeSetItem('betaCattleDataVersion', String(DATA_SCHEMA_VERSION));
+            } else {
+                localStorage.removeItem('betaLastSyncDate');
+            }
+
+            // Retire tombstones the cloud has already dropped (keeps the set from growing forever)
+            const allCloudIds = new Set([...cloudRecordIds, ...cloudMoveIds]);
+            Object.keys(tombstones).forEach(id => {
+                if (!allCloudIds.has(id)) delete tombstones[id];
+            });
+            saveTombstones();
+            
+            updateDataLists(); 
+            if (historySection.style.display === 'block') {
+                updateRecentList();
+                updateMovesList();
+            }
+            updateDailySummary();
+            // What the device actually holds, not just that something
+            // happened. "Refreshed" told a cowboy nothing when the tag map
+            // had come back empty, and an empty tag map is exactly what a
+            // tag that will not resolve looks like from the outside.
+            const tagCount = Object.keys(tagLotMap).length;
+            syncCloudBtn.innerText = tagCount > 0
+                ? `✅ ${lotsDatabase.length} lots · ${tagCount} tags`
+                : "⚠ REFRESHED — NO TAGS";
+            syncCloudBtn.title = `${lotsDatabase.length} lots, ${tagCount} tags, `
+                + `${tagRanges.length} tag ranges, `
+                + `${Object.keys(tagLocationMap).length} known locations`;
+        }
+    } catch (err) { 
+        console.error('processCloudData error:', err);
+        syncCloudBtn.innerText = "❌ Data Error"; 
+    }
+    setTimeout(() => { syncCloudBtn.innerText = "🔄 Pull Cloud History"; }, 3000);
+};
+
+// lot_tags runs to thousands of rows and PostgREST caps a response at 1000,
+// so this pages until a short page comes back. Without paging, tags beyond
+// the first 1000 would silently have no location - the worst kind of wrong,
+// because it looks like "no data" rather than "truncated".
+// PostgREST caps a response at 1000 rows. Anything that can outgrow that has
+// to be paged, or it truncates silently - which reads as "no data" rather
+// than an error, and is the worst way for this to fail.
+//
+// `build` is called per page and must return a fresh query; PostgREST
+// builders are single-use, so reusing one across pages does not work.
+async function fetchAllPages(build, label) {
+    const PAGE = 1000;
+    let from = 0, all = [];
+    for (;;) {
+        const { data, error } = await build().range(from, from + PAGE - 1);
+        if (error) throw error;
+        all = all.concat(data || []);
+        if (!data || data.length < PAGE) break;
+        from += PAGE;
+        if (from > 50000) {
+            console.warn(`${label}: stopped paging at ${from} rows (runaway guard)`);
+            break;
+        }
+    }
+    return all;
+}
+
+async function fetchOpenLotTags() {
+    const rows = await fetchAllPages(() => sb
+        .from('lot_tags')
+        .select('tag_number, lot_id, delivery_receipt_id, retired_at, lots!inner(lot_number, closed_at, is_test)')
+        .is('retired_at', null)
+        .is('lots.closed_at', null)
+        .order('tag_number'), 'lot_tags');
+    return rows.filter(t => t.lots && !t.lots.is_test);
+}
+
+// Reads now come from Supabase instead of a JSONP <script> injection
+// against the Apps Script endpoint. The payload is shaped to exactly what
+// processCloudData already expects, so the merge/tombstone logic below it
+// is untouched.
+async function pullCloudData() {
+    if (!currentUserId) { showToast('Sign in first', 'error', 2000); return; }
+    syncCloudBtn.innerText = "⏳ Downloading...";
+    try {
+        // Window for the day's-activity report. Local midnight, not UTC:
+        // after about 7pm Central the UTC date is already tomorrow.
+        const reportSince = new Date();
+        reportSince.setHours(0, 0, 0, 0);
+        reportSince.setDate(reportSince.getDate() - (REPORT_DAYS - 1));
+        const reportSinceDay = localDay(reportSince);
+        const reportSinceIso = reportSince.toISOString();
+
+        const [entriesRes, medsRes, pasturesRes, statusRes, lotsRes, bookRes, assignRes, destRes, receiptRes, actionsRes, protosRes,
+               docDayRes, moveDayRes, deadDayRes, stagedDayRes] = await Promise.all([
+            // THIS PHONE'S OWN submissions, and only ever those. It feeds
+            // `records`, which the History tab renders with Edit and Delete
+            // buttons, so anything that lands here is treated as this user's
+            // to change. Since 2026-08-25 crew can SELECT every staged row
+            // (for the day's-activity report), which means RLS no longer
+            // narrows this on its own - the filter has to be explicit, or a
+            // pull would drop every other cowboy's entries into this list
+            // with edit controls that the write policies would then refuse,
+            // silently. The report reads its own copy further down.
+            fetchAllPages(() => sb.from(STAGING_TABLE)
+              .select('entry_type, raw, status')
+              .eq('submitted_by', currentUserId)
+              .neq('status', 'withdrawn')
+              .order('submitted_at', { ascending: false }), 'pending_field_entries')
+              .then(data => ({ data, error: null }), error => ({ data: null, error })),
+            sb.from('medications')
+              .select('name, dose_mode, flat_dose_amount, per_weight_rate, per_weight_basis, default_dose_amount')
+              .eq('is_active', true).order('name'),
+            sb.from('pastures')
+              .select('id, name, is_active, ranches!inner(name, is_active)')
+              .eq('is_active', true).order('name'),
+            // Tags recycle across fiscal years, so the field app only ever
+            // offers OPEN lots. lot_status carries the weight/ADG figures the
+            // estimated-weight box and the dose auto-fill depend on; `lots`
+            // carries the tag range used to infer a lot from a tag number.
+            sb.from('lot_status')
+              .select('lot_id, lot_number, arrival_date, target_adg, avg_weight_in, ' +
+                      'projected_current_weight, days_since_weighted_arrival, closed_at')
+              .is('closed_at', null).order('lot_number'),
+            sb.from('lots')
+              .select('id, lot_number, start_tag, end_tag, closed_at, is_test')
+              .is('closed_at', null),
+            // Treatments already in the books. Without these, tag recall and
+            // the 1st/2nd-pull safety checks only ever see what this phone
+            // submitted, so an animal treated last month looks untouched.
+            fetchAllPages(() => sb.from('doctoring_events')
+              .select('tag_number, event_datetime, lot_id, pasture_id, field_actions(name), lots!inner(lot_number, closed_at, is_test)')
+              .is('lots.closed_at', null)
+              .order('event_datetime', { ascending: false }), 'doctoring_events')
+              .then(data => ({ data, error: null }), error => ({ data: null, error })),
+            // A lot usually spans several pastures, so location can only be
+            // inferred when it sits in exactly one.
+            sb.from('lot_pasture_assignments')
+              .select('lot_id, pasture_id, head_count, moved_out, pastures!inner(name, ranches!inner(name))')
+              .is('moved_out', null),
+            // Where each delivery receipt's cattle were turned out. Combined
+            // with lot_tags.delivery_receipt_id this is the only per-ANIMAL
+            // location the books hold.
+            // No open-lot filter here (a tag's receipt may sit on any lot), so
+            // this only ever grows - one row per receipt per destination.
+            fetchAllPages(() => sb.from('load_out_destinations')
+              .select('receipt_id, pasture_id').order('receipt_id'), 'load_out_destinations')
+              .then(data => ({ data, error: null }), error => ({ data: null, error })),
+            // Tag ranges per RECEIPT. lots.start_tag/end_tag only ever held the
+            // FIRST load: lot 36-27 reads 8255-8283 there while its eleven
+            // receipts actually span 8255-8695. Receipt ranges are the real ones.
+            fetchAllPages(() => sb.from('delivery_receipts')
+              .select('lot_id, tag_start, tag_end, lots!inner(lot_number, closed_at, is_test)')
+              .is('lots.closed_at', null).order('lot_id'), 'delivery_receipts')
+              .then(data => ({ data, error: null }), error => ({ data: null, error })),
+            sb.from('field_actions').select('name, is_dead, sort_order').order('sort_order'),
+            sb.from('field_protocols')
+              .select('is_active, field_actions(name), ' +
+                      'm1:medications!field_protocols_default_med_1_id_fkey(name), ' +
+                      'm2:medications!field_protocols_default_med_2_id_fkey(name), ' +
+                      'm3:medications!field_protocols_default_med_3_id_fkey(name)')
+              .eq('is_active', true),
+
+            // ---- The day's-activity report -----------------------------
+            // Everyone's work, not just this phone's. Deliberately a narrow
+            // window: booksHistory above is unbounded because tag recall
+            // needs every treatment an animal ever had, but the report only
+            // looks back a few days and carrying meds on 1,000+ rows would
+            // push a phone into the storage-full path for no gain.
+            fetchAllPages(() => sb.from('doctoring_events')
+              .select('id, tag_number, no_tag, event_datetime, pasture_id, legacy_source, legacy_id, ' +
+                      'field_actions(name, is_dead), lots!inner(lot_number, is_test), ' +
+                      'doctoring_event_meds(position, dose_cc, medication_name_freetext, medications(name))')
+              .gte('event_datetime', reportSinceIso)
+              .order('event_datetime', { ascending: true }), 'report doctoring')
+              .then(data => ({ data, error: null }), error => ({ data: null, error })),
+            sb.from('lot_movements')
+              .select('id, move_date, head_count, notes, from_pasture_id, to_pasture_id, lots!inner(lot_number, is_test)')
+              .gte('move_date', reportSinceDay),
+            sb.from('lot_events')
+              .select('id, event_date, head_count, tag_number, cause, notes, pasture_id, lots!inner(lot_number, is_test)')
+              .eq('event_type', 'death').gte('event_date', reportSinceDay),
+            // Staged rows for the same window. Approved ones are already in
+            // the books above, so they are carried only to recover the name
+            // of the cowboy who did the work - the posted row records the
+            // office user who approved it, not him.
+            fetchAllPages(() => sb.from(STAGING_TABLE)
+              .select('entry_type, raw, status, review_notes, event_datetime, client_id, approved_ref')
+              .neq('status', 'withdrawn')
+              .gte('event_datetime', reportSinceIso)
+              .order('event_datetime', { ascending: true }), 'report staged entries')
+              .then(data => ({ data, error: null }), error => ({ data: null, error }))
+        ]);
+
+        // Degrade rather than die. Previously a single failing query threw and
+        // the cowboy lost lots, meds and protocols together, with nothing to
+        // say which one broke. Now each is reported by name and whatever
+        // succeeded is still used.
+        const named = [
+            ['entries', entriesRes], ['medications', medsRes], ['pastures', pasturesRes],
+            ['lot_status', statusRes], ['lots', lotsRes], ['doctoring history', bookRes],
+            ['pasture assignments', assignRes], ['receipt destinations', destRes],
+            ['receipt tag ranges', receiptRes], ['actions', actionsRes], ['protocols', protosRes],
+            ['day report: doctoring', docDayRes], ['day report: moves', moveDayRes],
+            ['day report: deaths', deadDayRes], ['day report: entries', stagedDayRes]
+        ];
+        const failed = named.filter(([, r]) => r.error);
+        if (failed.length) {
+            failed.forEach(([name, r]) => console.error(`pull failed for ${name}:`, r.error));
+            showToast(`\u26a0 Couldn't load: ${failed.map(([n]) => n).join(', ')}`, 'error', 6000);
+        }
+        // Losing the lot list is not a partial failure - the form cannot work
+        // without it, so that one still stops the pull.
+        if (statusRes.error && lotsRes.error) throw statusRes.error;
+
+        const entries = entriesRes.data || [];
+
+        // Rebuild the app's own record shape straight out of `raw` — it is
+        // the submitted payload verbatim, so no back-conversion is needed.
+        // `raw` is the submitted payload verbatim, so the app's own record
+        // shape needs no back-conversion. The one thing carried alongside it
+        // is the review status: an APPROVED entry is in the books and its raw
+        // payload is immutable in the DB, so offering Edit on it would build
+        // a re-send the server is guaranteed to reject.
+        const withStatus = (e) => Object.assign({}, e.raw, { _status: e.status || 'pending' });
+        const cloudRecords = entries.filter(e => e.entry_type === 'doctoring').map(withStatus);
+        const cloudMoves   = entries.filter(e => e.entry_type === 'move').map(withStatus);
+
+        // The dose string feeds triggerMedAutoFill(), which splits on '/'
+        // to mean rate-per-basis and otherwise treats it as a flat dose.
+        const medications = (medsRes.data || []).map(m => ({
+            name: m.name,
+            dose: m.dose_mode === 'per_weight' && m.per_weight_rate && m.per_weight_basis
+                ? `${m.per_weight_rate}/${m.per_weight_basis}`
+                : String(m.flat_dose_amount ?? m.default_dose_amount ?? '')
+        }));
+
+        const locations = (pasturesRes.data || [])
+            .filter(p => p.ranches && p.ranches.is_active)
+            .map(p => ({ property: p.ranches.name, pasture: p.name }));
+
+        // The app reads lotNumber, startTag, endTag, arrivalDate, targetADG and
+        // avgWeight off these rows. Anything missing silently degrades a
+        // feature rather than erroring: no tag range means no lot inferred
+        // from a tag, and no weight/ADG means estimated weight stays 0, which
+        // in turn stops per-weight doses auto-filling.
+        const tagRangeById = {};
+        (lotsRes.data || []).forEach(l => { tagRangeById[l.id] = l; });
+        const lots = (statusRes.data || [])
+            .map(l => {
+                const base = tagRangeById[l.lot_id] || {};
+                return {
+                    lotNumber:   l.lot_number,
+                    startTag:    base.start_tag,
+                    endTag:      base.end_tag,
+                    arrivalDate: l.arrival_date,
+                    targetADG:   l.target_adg,
+                    avgWeight:   l.avg_weight_in,
+                    // The office weights off the WEIGHTED arrival date (head-
+                    // weighted across the loads), not the first load. Carrying
+                    // the view's own numbers is what keeps the two apps equal.
+                    projWeight:  l.projected_current_weight,
+                    weightedDOF: l.days_since_weighted_arrival,
+                    isTest:      !!base.is_test
+                };
+            })
+            .filter(l => !l.isTest);
+
+        // Lot -> "Ranch - Pasture", only where the lot sits in exactly one
+        // pasture. Ambiguous lots are left out so the form asks rather than
+        // guessing wrong.
+        const pastureCountByLot = {};
+        const soleLocationByLot = {};
+        (assignRes.data || []).forEach(a => {
+            pastureCountByLot[a.lot_id] = (pastureCountByLot[a.lot_id] || 0) + 1;
+            if (a.pastures && a.pastures.ranches) {
+                soleLocationByLot[a.lot_id] = `${a.pastures.ranches.name} - ${a.pastures.name}`;
+            }
+        });
+
+        // --- Per-tag location -------------------------------------------
+        // The books track pasture per LOT, not per animal: when 120 head of a
+        // 400-head lot move, nothing records WHICH 120. So a tag's location is
+        // only knowable in two cases, and this deliberately resolves nothing
+        // else rather than guessing:
+        //
+        //   1. Its receipt turned out into exactly one pasture, AND the lot
+        //      still has an open assignment there (so it has not moved off).
+        //   2. Its lot currently sits in exactly one pasture.
+        //
+        // Roughly half of open tags land in case 1 or 2 today; the rest are
+        // genuinely unknown and the cowboy is asked.
+        const pastureLabelById = {};
+        (pasturesRes.data || []).forEach(p => {
+            if (p.ranches) pastureLabelById[p.id] = `${p.ranches.name} - ${p.name}`;
+        });
+
+        // receipt -> its single destination pasture (skipped if it split)
+        const destsByReceipt = {};
+        (destRes.data || []).forEach(d => {
+            (destsByReceipt[d.receipt_id] = destsByReceipt[d.receipt_id] || []).push(d.pasture_id);
+        });
+
+        // Open, non-test lots by id. Declared here because the pasture->lots
+        // map below needs it; the later lotNumberById is the same thing built
+        // further down for the doctoring history and is left alone.
+        const lotNumberByIdEarly = {};
+        (lotsRes.data || []).forEach(l => { if (!l.is_test) lotNumberByIdEarly[l.id] = l.lot_number; });
+
+        // lot -> set of pastures it is currently open in
+        const openPastureIdsByLot = {};
+        (assignRes.data || []).forEach(a => {
+            (openPastureIdsByLot[a.lot_id] = openPastureIdsByLot[a.lot_id] || []).push(a.pasture_id);
+        });
+
+        // "Ranch - Pasture" -> the lots standing there, with head. This is
+        // what lets the move form ask which lot is moving: the cowboy at the
+        // gate knows, and the office two days later is guessing from a map.
+        const pastureLots = {};
+        (assignRes.data || []).forEach(a => {
+            const label = a.pastures && a.pastures.ranches
+                ? `${a.pastures.ranches.name} - ${a.pastures.name}` : null;
+            const lot = lotNumberByIdEarly[a.lot_id];
+            if (!label || !lot) return;
+            (pastureLots[label] = pastureLots[label] || []).push({ lot, head: a.head_count });
+        });
+        Object.keys(pastureLots).forEach(k =>
+            pastureLots[k].sort((x, y) => String(x.lot).localeCompare(String(y.lot))));
+
+        const tagLocations = {};
+        const tagLots = {};
+        const tagCandidates = {};
+        let tagFetchOk = false;
+        try {
+            const openTags = await fetchOpenLotTags();
+            tagFetchOk = true;
+            openTags.forEach(t => {
+                if (t.lots && t.lots.lot_number) tagLots[String(t.tag_number)] = t.lots.lot_number;
+                const dests = destsByReceipt[t.delivery_receipt_id] || [];
+                const openHere = openPastureIdsByLot[t.lot_id] || [];
+                let pid = null;
+                // Case 1: single arrival pasture the lot has not left.
+                if (dests.length === 1 && openHere.indexOf(dests[0]) !== -1) pid = dests[0];
+                // Case 2: the lot is only in one place, so the animal is too.
+                else if (openHere.length === 1) pid = openHere[0];
+                if (pid && pastureLabelById[pid]) {
+                    tagLocations[String(t.tag_number)] = pastureLabelById[pid];
+                    return;
+                }
+                // Unresolved. Say WHY, and narrow it to the pastures it could
+                // actually be in - a blank box reads as broken, and "one of
+                // these two" is most of the answer on a load that split.
+                let why = null, ids = [];
+                if (dests.length > 1) {
+                    why = 'split';
+                    // Only offer arrival pastures the lot still occupies.
+                    ids = dests.filter(id => openHere.indexOf(id) !== -1);
+                    if (ids.length === 0) { why = 'moved'; ids = openHere; }
+                } else if (dests.length === 1) {
+                    // Arrived somewhere the lot has since left entirely.
+                    why = 'moved'; ids = openHere;
+                } else if (openHere.length > 1) {
+                    why = 'multi'; ids = openHere;
+                }
+                const places = [...new Set(ids)].map(id => pastureLabelById[id]).filter(Boolean).sort();
+                if (why && places.length > 1) tagCandidates[String(t.tag_number)] = { why, places };
+            });
+        } catch (tagErr) {
+            // Location is an autofill convenience; losing it must not fail the
+            // whole pull and leave the cowboy without lots or meds.
+            console.warn('tag location build failed:', tagErr);
+        }
+
+        // Only replace a cache when its own fetch actually succeeded. This
+        // used to assign unconditionally, so one failed request replaced a
+        // good tag map with {} AND persisted the empty version - turning a
+        // transient network blip into a device that could no longer resolve
+        // any tag. Keeping the previous data is always better than keeping
+        // nothing.
+        if (!assignRes.error) {
+            pastureLotsMap = pastureLots;
+            safeSetItem('betaCattlePastureLots', JSON.stringify(pastureLotsMap));
+        }
+        if (tagFetchOk) {
+            tagLocationMap = tagLocations;
+            tagLotMap = tagLots;
+            tagCandidateMap = tagCandidates;
+            safeSetItem('betaCattleTagLocations', JSON.stringify(tagLocationMap));
+            safeSetItem('betaCattleTagLots', JSON.stringify(tagLotMap));
+            safeSetItem('betaCattleTagCandidates', JSON.stringify(tagCandidateMap));
+        }
+        if (!receiptRes.error) {
+            tagRanges = (receiptRes.data || [])
+                .filter(r => r.lots && !r.lots.is_test && r.tag_start != null && r.tag_end != null)
+                .map(r => ({ lotNumber: r.lots.lot_number, start: r.tag_start, end: r.tag_end }));
+            safeSetItem('betaCattleTagRanges', JSON.stringify(tagRanges));
+        }
+        const lookupsComplete = tagFetchOk && !receiptRes.error;
+
+        // Book treatments, shaped like the app's own records so the same
+        // lookups work on both. No id: these must never be edited or deleted
+        // from the field app, and every write path keys off id.
+        const lotNumberById = {};
+        (lotsRes.data || []).forEach(l => { lotNumberById[l.id] = l.lot_number; });
+        booksHistory = (bookRes.data || [])
+            .filter(d => d.lots && !d.lots.is_test)
+            .map(d => ({
+                fromBooks: true,
+                tagNumber: d.tag_number,
+                dateTime: d.event_datetime,
+                lotNumber: (d.lots && d.lots.lot_number) || lotNumberById[d.lot_id] || '',
+                treatmentType: (d.field_actions && d.field_actions.name) || '',
+                // Prefer the pasture recorded ON the event; only 16 of 1080
+                // rows have one today because the office doctoring form does
+                // not yet ask, but it is the most accurate source when set.
+                location: (d.pasture_id && pastureLabelById[d.pasture_id])
+                    || tagLocations[tagKey(d.tag_number)]
+                    || (pastureCountByLot[d.lot_id] === 1 ? (soleLocationByLot[d.lot_id] || '') : '')
+            }));
+        safeSetItem('betaCattleBooksHistory', JSON.stringify(booksHistory));
+
+        // The day's-activity report, built from the four windowed queries.
+        // Stored whole so the modal opens instantly and works with no signal.
+        dayReport = buildDayReport(
+            docDayRes.data, moveDayRes.data, deadDayRes.data, stagedDayRes.data,
+            pastureLabelById);
+        safeSetItem(DAY_REPORT_KEY, JSON.stringify(dayReport));
+
+        // The action dropdown is built from protocols, and it appends Dead
+        // and Other itself — so those two are excluded here to avoid
+        // listing them twice. Receiving has no protocol row but must still
+        // appear, which is why this is driven by field_actions rather than
+        // by field_protocols.
+        const medsByAction = {};
+        (protosRes.data || []).forEach(fp => {
+            const name = fp.field_actions && fp.field_actions.name;
+            if (name) medsByAction[name] = fp;
+        });
+        const protocols = (actionsRes.data || [])
+            .filter(a => a.name !== 'Dead' && a.name !== 'Other')
+            .map(a => {
+                const fp = medsByAction[a.name] || {};
+                return {
+                    actionName: a.name,
+                    med1: (fp.m1 && fp.m1.name) || '',
+                    med2: (fp.m2 && fp.m2.name) || '',
+                    med3: (fp.m3 && fp.m3.name) || ''
+                };
+            });
+
+        window.processCloudData({
+            records: cloudRecords, moves: cloudMoves,
+            medications, locations, lots, protocols,
+            lookupsComplete
+        });
+    } catch (err) {
+        console.error('pullCloudData error:', err);
+        syncCloudBtn.innerText = "❌ " + (err.message ? err.message.slice(0, 24) : 'Data Error');
+        setTimeout(() => { syncCloudBtn.innerText = "🔄 Pull Cloud History"; }, 4000);
+    }
+}
+syncCloudBtn.onclick = pullCloudData;
+
+function triggerMedAutoFill(medInput, doseInput) {
+    const medName = medInput.value.trim().toLowerCase();
+    if (!medName) {
+        // No med = no dose. Prevents stale doses from sticking around.
+        doseInput.value = '';
+        return;
+    }
+    const selectedMed = medsDatabase.find(m => m.name.toLowerCase() === medName);
+    if (selectedMed && selectedMed.dose && currentEstWeight > 0) {
+        if (selectedMed.dose.includes('/')) {
+            let parts = selectedMed.dose.split('/');
+            doseInput.value = Math.ceil((currentEstWeight / parseFloat(parts[1])) * parseFloat(parts[0]));
+        } else { doseInput.value = selectedMed.dose; }
+    }
+}
+[med1, med2, med3].forEach((m, i) => m.onchange = () => triggerMedAutoFill(m, document.getElementById(`dosage${i+1}`)));
+
+// =========================================================
+// SMART AUTO-FILL (Location & Lot logic)
+// =========================================================
+tagNumberInput.oninput = function(e) {
+    const val = e.target.value.trim();
+    clearTagBtn.style.display = val !== '' ? 'flex' : 'none';
+    if (editingRecordId) return;
+    
+    if (val === '') {
+        tagAlert.style.display = 'none';
+        // Don't clear locked fields — they need to persist across saves
+        if (!locks.lot)    lotInput.value = '';
+        if (!locks.action) treatmentTypeInput.value = '';
+        lotInput.style.pointerEvents = 'auto';
+        lotInput.style.backgroundColor = '#ffffff';
+        return;
+    }
+
+    treatmentTypeInput.disabled = false;
+
+    const hist = historyPool().find(r => String(r.tagNumber) === val);
+    let foundLot = hist ? hist.lotNumber : "";
+
+    if (!foundLot) foundLot = resolveLotForTag(val);
+    
+    let lotMissingFromList = false;
+    if (foundLot && !locks.lot) {
+        if (setSelectValue(lotInput, foundLot)) {
+            lotInput.style.pointerEvents = 'none';
+            lotInput.style.backgroundColor = '#e5e5ea';
+        } else {
+            // The tag resolved but this device has no option for that lot -
+            // its lot list is stale or the pull failed. Say so; do not leave
+            // the cowboy staring at an empty box.
+            lotMissingFromList = true;
+            lotInput.style.pointerEvents = 'auto';
+            lotInput.style.backgroundColor = '#ffffff';
+        }
+    } else if (!locks.lot) {
+        lotInput.style.pointerEvents = 'auto';
+        lotInput.style.backgroundColor = '#ffffff';
+    }
+
+    // Where this animal is. A previous entry for this exact tag wins - it is
+    // the most recent first-hand sighting. Otherwise fall back to what the
+    // books can prove about this tag. If neither knows, leave it blank and
+    // let the cowboy say, rather than filling in a guess.
+    const recalledLocation = (hist && hist.location && hist.location.includes(" - "))
+        ? hist.location
+        : (tagLocationMap[tagKey(val)] || '');
+
+    if (recalledLocation && recalledLocation.includes(" - ") && !locks.ranch && !locks.pasture) {
+        const parts = recalledLocation.split(" - ");
+        const prop = String(parts[0]).trim();
+        const past = String(parts[1]).trim();
+
+        propertyInput.value = prop;
+        pastureInput.disabled = false;
+        
+        const pastures = locsDatabase
+            .filter(l => l.property && String(l.property).trim() === prop)
+            .map(l => String(l.pasture).trim())
+            .sort();
+        const uniquePastures = [...new Set(pastures)];
+        pastureInput.innerHTML = '<option value="" disabled selected>Select Pasture...</option>'
+            + uniquePastures.map(p => `<option value="${p}">${p}</option>`).join('');
+        
+        setSelectValue(pastureInput, past);
+    }
+
+    updateAlertBox(lotMissingFromList ? foundLot : '');
+};
+
+function updateAlertBox(staleLot) {
+    const tagVal = tagNumberInput.value.trim();
+    const lotVal = lotInput.value.trim();
+    let alertHtml = "";
+
+    // A resolved lot that is not in this device's list means stale cached
+    // data, not an unknown animal. Naming it is the difference between a
+    // fixable problem and "the app just doesn't work".
+    if (staleLot) {
+        alertHtml += `<div style="color:#b00020"><b>⚠ Tag is on lot ${staleLot}, `
+            + `but this device's lot list is out of date.</b> Tap Sync Cloud Data, `
+            + `then re-enter the tag.</div>`;
+    }
+    
+    if (tagVal !== '') {
+        const history = historyPool().filter(r => String(r.tagNumber) === tagVal && String(r.id) !== String(editingRecordId));
+        if (history.length > 0) {
+            // Tappable history line — opens a modal with the prior records
+            alertHtml += `<div class="tag-history-link" onclick="showTagHistory('${tagVal.replace(/'/g, "\\'")}')">⚠️ <b>History:</b> ${history.length} previous record${history.length > 1 ? 's' : ''} <span class="tag-history-cta">— tap to view ▸</span></div>`;
+        }
+    }
+    
+    // Why the pasture did not fill itself in. The books record pasture per
+    // LOT, not per animal, so when a load turned out into two pastures nobody
+    // wrote down which half each tag went to - the answer does not exist to
+    // look up. Naming the candidates turns a blank box into a two-way choice.
+    if (tagVal !== '' && !pastureInput.value) {
+        const cand = tagCandidateMap[tagKey(tagVal)];
+        if (cand && cand.places && cand.places.length > 1) {
+            const list = cand.places.map(p => `<b>${p}</b>`).join(' or ');
+            const why = cand.why === 'split'
+                ? 'This load was split between these pastures on arrival'
+                : cand.why === 'moved'
+                    ? 'This lot has moved since arrival, and is now in'
+                    : 'This lot is in more than one pasture';
+            alertHtml += `<div style="margin-top:4px">📍 ${why}: ${list}. `
+                + `The books track pasture by lot, not by tag, so pick the one it came out of.</div>`;
+        }
+    }
+
+    currentEstWeight = 0; 
+    if (lotVal !== '') {
+        const lot = lotsDatabase.find(l => String(l.lotNumber).trim().toLowerCase() === lotVal.toLowerCase());
+        if (lot) {
+            // Days on feed. The office measures this from the lot's WEIGHTED
+            // arrival date - head-weighted across every load - not from the
+            // first load. On a lot still receiving, those are far apart: 36-27
+            // first landed Aug 11 but its average animal arrived Aug 19, so
+            // counting from Aug 11 overstated the estimate by eight days of
+            // gain. Use the view's own figure and only fall back to a local
+            // calculation when it is missing.
+            let dof = (lot.weightedDOF != null && !isNaN(Number(lot.weightedDOF)))
+                ? Math.max(0, Math.round(Number(lot.weightedDOF)))
+                : daysOnFeedFrom(lot.arrivalDate);
+            const gain = parseFloat(lot.targetADG) || 0;
+            const startW = parseFloat(lot.avgWeight) || 0;
+            // Same rule for the weight itself: the books' number wins.
+            currentEstWeight = (lot.projWeight != null && !isNaN(Number(lot.projWeight)))
+                ? Math.round(Number(lot.projWeight))
+                : Math.round(startW + (dof * gain));
+            alertHtml += `📦 <b>Lot: ${lot.lotNumber}</b> | <b>DOF:</b> ${dof} | <b>Gain:</b> ${gain}<br><b>Est. Weight: ${currentEstWeight} lbs</b>`;
+        } else {
+            alertHtml += `📦 <b>Lot: ${lotVal}</b> (No weight data found)`;
+        }
+    }
+    
+    if (alertHtml !== "") {
+        tagAlert.style.backgroundColor = currentEstWeight > 0 ? '#e5fceb' : '#e5f0ff';
+        tagAlert.style.borderLeftColor = currentEstWeight > 0 ? '#34c759' : '#007aff';
+        tagAlert.innerHTML = alertHtml;
+        tagAlert.style.display = 'block';
+    } else {
+        tagAlert.style.display = 'none';
+    }
+}
+
+// =========================================================
+// TAG HISTORY MODAL — one-tap drill-in for chute decisions
+// =========================================================
+// One place that opens and closes a modal, so the body lock can never get
+// out of step with what is on screen. A modal left open with the lock off
+// scrolls the page behind it; a modal closed with the lock on freezes the
+// app. Counting open modals rather than toggling a boolean means closing one
+// of two does not unlock the page underneath the other.
+let openModalCount = 0;
+function openAppModal(id) {
+    const el = document.getElementById(id);
+    if (!el || el.style.display === 'block') return;
+    el.style.display = 'block';
+    el.scrollTop = 0;              // always open at the top, not where it was left
+    openModalCount++;
+    document.body.classList.add('modal-open');
+}
+function closeAppModal(id) {
+    const el = document.getElementById(id);
+    if (!el || el.style.display === 'none' || !el.style.display) return;
+    el.style.display = 'none';
+    openModalCount = Math.max(0, openModalCount - 1);
+    if (openModalCount === 0) document.body.classList.remove('modal-open');
+}
+
+window.showTagHistory = function(tag) {
+    const history = historyPool()
+        .filter(r => String(r.tagNumber) === String(tag))
+        .sort((a, b) => new Date(b.dateTime) - new Date(a.dateTime));
+
+    const body = document.getElementById('tagHistoryBody');
+    const title = document.getElementById('tagHistoryTitle');
+
+    title.textContent = `Tag ${tag} — ${history.length} record${history.length === 1 ? '' : 's'}`;
+
+    if (history.length === 0) {
+        body.innerHTML = '<p style="color:#8e8e93;">No prior records.</p>';
+    } else {
+        body.innerHTML = history.map(r => {
+            const dt = String(r.dateTime || '').replace('T', ' ').slice(0, 16);
+            const meds = [
+                r.medication1 && `${r.medication1}${r.dosage1 ? ' (' + r.dosage1 + ')' : ''}`,
+                r.medication2 && `${r.medication2}${r.dosage2 ? ' (' + r.dosage2 + ')' : ''}`,
+                r.medication3 && `${r.medication3}${r.dosage3 ? ' (' + r.dosage3 + ')' : ''}`
+            ].filter(Boolean).join(', ');
+            const isDead = String(r.treatmentType).toLowerCase().includes('dead');
+            return `
+                <div class="tag-history-card${isDead ? ' tag-history-card-dead' : ''}">
+                    <div class="thc-row">
+                        <span class="thc-action">${r.treatmentType || ''}</span>
+                        <span class="thc-date">${dt}</span>
+                    </div>
+                    ${meds ? `<div class="thc-meds">💊 ${meds}</div>` : ''}
+                    <div class="thc-meta">
+                        ${r.location ? `📍 ${r.location}` : ''}
+                        ${r.recordedBy ? ` · by ${r.recordedBy}` : ''}
+                        ${r.fromBooks ? ` · <span class="thc-books">from the books</span>` : ''}
+                    </div>
+                    ${r.drugOff ? `<div class="thc-drugoff">⚠ Drug off: ${r.drugOff}</div>` : ''}
+                    ${r.notes ? `<div class="thc-notes">📝 ${r.notes}</div>` : ''}
+                </div>
+            `;
+        }).join('');
+    }
+
+    openAppModal('tagHistoryModal');
+};
+
+window.closeTagHistory = function() {
+    closeAppModal('tagHistoryModal');
+};
+
+// =========================================================
+// ACTION SAFETY VALIDATION (Checks as soon as selected)
+// =========================================================
+function validateActionSafety(tag, action) {
+    if (!tag || !action) return { valid: true };
+    
+    const actionLower = action.toLowerCase();
+    const tagHistory = historyPool().filter(r => String(r.tagNumber) === tag && String(r.id) !== String(editingRecordId));
+
+    const hasFirstPull = tagHistory.some(r => r.treatmentType.toLowerCase().includes('1st') || r.treatmentType.toLowerCase().includes('first'));
+    const hasSecondPull = tagHistory.some(r => r.treatmentType.toLowerCase().includes('2nd') || r.treatmentType.toLowerCase().includes('second'));
+    const hasDead = tagHistory.some(r => r.treatmentType.toLowerCase().includes('dead'));
+
+    if ((actionLower.includes('1st') || actionLower.includes('first')) && hasFirstPull) {
+        return { valid: false, msg: `Tag ${tag} already has a 1st Pull on record.` };
+    }
+
+    if (actionLower.includes('2nd') || actionLower.includes('second')) {
+        if (hasSecondPull) {
+            return { valid: false, msg: `Tag ${tag} already has a 2nd Pull on record.` };
+        }
+        if (tagToInt(tag) != null) {
+            const resolved = resolveLotForTag(tag);
+            const lot = resolved ? lotsDatabase.find(l => String(l.lotNumber) === String(resolved)) : null;
+            if (lot && lot.arrivalDate && String(lot.arrivalDate).trim() !== "") {
+                if (!hasFirstPull) {
+                    return { valid: false, msg: `Tag ${tag} is registered to Lot ${lot.lotNumber} with an arrival date. You cannot record a 2nd Pull without a 1st Pull.` };
+                }
+            }
+        }
+    }
+
+    if (actionLower.includes('dead') && hasDead) {
+        return { valid: false, msg: `Tag ${tag} is already marked as Dead.` };
+    }
+
+    return { valid: true };
+}
+
+treatmentTypeInput.onchange = function(e) {
+    const action = e.target.value;
+    const tag = tagNumberInput.value.trim();
+
+    // WORKFLOW UPGRADE: Instant Action Validation
+    const safetyCheck = validateActionSafety(tag, action);
+    if (!safetyCheck.valid) {
+        showToast(`🛑 ${safetyCheck.msg}`, 'error', 3500);
+        treatmentTypeInput.value = ''; // Instantly clear the bad selection
+        updateFormVisibility(''); 
+        return;
+    }
+
+    updateFormVisibility(action);
+    // Always clear all three med + dose slots before applying the new protocol,
+    // otherwise stale values from the previous action linger.
+    med1.value = ''; med2.value = ''; med3.value = '';
+    dose1.value = ''; dose2.value = ''; dose3.value = '';
+
+    const proto = protocolsDatabase.find(p => p.actionName === action);
+    if (proto) {
+        med1.value = proto.med1 || ''; med2.value = proto.med2 || ''; med3.value = proto.med3 || '';
+        [med1, med2, med3].forEach((m, i) => triggerMedAutoFill(m, document.getElementById(`dosage${i+1}`)));
+    }
+};
+
+function updateDataLists() {
+    lotInput.innerHTML = '<option value="" disabled selected>Select Lot...</option>'
+        + lotsDatabase.map(l => `<option value="${l.lotNumber}">${l.lotNumber}</option>`).join('');
+
+    medicationList.innerHTML = medsDatabase.map(m => `<option value="${m.name}">`).join('');
+
+    const props = [...new Set(locsDatabase.map(l => String(l.property).trim()))].sort();
+    propertyInput.innerHTML = '<option value="" disabled selected>Select Ranch...</option>'
+        + props.map(p => `<option value="${p}">${p}</option>`).join('');
+
+    treatmentTypeInput.innerHTML = '<option value="" disabled selected>Select Action...</option>'
+        + protocolsDatabase.map(p => `<option value="${p.actionName}">${p.actionName}</option>`).join('')
+        + '<option value="Dead">Dead</option><option value="Other">Other</option>';
+}
+
+propertyInput.onchange = function() {
+    pastureInput.disabled = false;
+    const prop = this.value;
+    const pastures = locsDatabase
+        .filter(l => l.property && String(l.property).trim() === String(prop).trim())
+        .map(l => String(l.pasture).trim())
+        .sort();
+    const uniquePastures = [...new Set(pastures)];
+    pastureInput.innerHTML = '<option value="" disabled selected>Select Pasture...</option>'
+        + uniquePastures.map(p => `<option value="${p}">${p}</option>`).join('');
+    updateAlertBox();
+};
+
+// Once the pasture is answered the "we cannot know which" note has served its
+// purpose, so clear it rather than leaving it nagging over a filled field.
+pastureInput.onchange = function() { updateAlertBox(); };
+
+function pushToCloud(record) {
+    // Queue for resilient delivery. Retries on reconnect, focus, and interval.
+    enqueueForSync(record);
+}
+
+// Submitting Doctoring Record
+// A toast is gone in three seconds and does not say WHERE the gap is. On a
+// phone at a chute that is the difference between fixing it and tapping Save
+// again. So the missing fields are marked, the first one is scrolled to and
+// focused, and the mark clears itself as soon as something is entered.
+function clearMissingFields() {
+    document.querySelectorAll('.field-missing').forEach(el => el.classList.remove('field-missing'));
+    const banner = document.getElementById('missingBanner');
+    if (banner) banner.style.display = 'none';
+}
+
+function flagMissingFields(missing) {
+    clearMissingFields();
+    const names = missing.map(m => m[0]);
+    missing.forEach(([, id]) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.classList.add('field-missing');
+        // One-shot: the mark comes off the moment the cowboy answers it.
+        const off = () => { el.classList.remove('field-missing'); el.removeEventListener('input', off); el.removeEventListener('change', off); };
+        el.addEventListener('input', off);
+        el.addEventListener('change', off);
+    });
+
+    let banner = document.getElementById('missingBanner');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'missingBanner';
+        banner.className = 'missing-banner';
+        doctoringForm.insertBefore(banner, doctoringForm.firstChild);
+    }
+    banner.innerHTML = `<b>Fill these in before saving:</b><br>${names.join(' · ')}`;
+    banner.style.display = 'block';
+
+    const first = document.getElementById(missing[0][1]);
+    if (first) {
+        first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // focus() on a select opens the picker on some phones, which is
+        // helpful here — it is the next thing they have to do anyway.
+        try { first.focus({ preventScroll: true }); } catch (e) { first.focus(); }
+    }
+    showToast(`Missing: ${names.join(', ')}`, 'error', 4000);
+}
+
+doctoringForm.onsubmit = function(e) {
+    e.preventDefault();
+
+    // Guard against double-taps / rapid resubmits
+    if (isSubmittingDoctoring) return;
+
+    const prop = propertyInput.value.trim();
+    const past = pastureInput.value.trim();
+    const tag = tagNumberInput.value.trim();
+    const action = treatmentTypeInput.value;
+    const lot = lotInput.value.trim();
+
+    // Everything the office needs to post this into the books without
+    // guessing. Lot and Pasture were missing from this check: an entry
+    // without them still saved and synced, and then sat in the approvals
+    // queue blocked, needing somebody to work out after the fact where the
+    // animal was — which is exactly what the cowboy knew at the chute and
+    // nobody knows later.
+    const missing = [];
+    if (!recordedByInput.value.trim()) missing.push(['Crew Member', 'recordedBy']);
+    if (!tag)    missing.push(['Tag # (or NT)', 'tagNumber']);
+    if (!lot)    missing.push(['Lot #', 'lotNumber']);
+    if (!prop)   missing.push(['Ranch', 'propertyInput']);
+    if (!past)   missing.push(['Pasture', 'pastureInput']);
+    if (!action) missing.push(['Action', 'treatmentType']);
+    if (missing.length) {
+        flagMissingFields(missing);
+        return;
+    }
+    clearMissingFields();
+
+    // Final safety net check just in case
+    const safetyCheck = validateActionSafety(tag, action);
+    if (!safetyCheck.valid) {
+        showToast(`🛑 ${safetyCheck.msg}`, 'error', 3500);
+        return;
+    }
+
+    const tagMsg = tag ? tag : "No Tag (NT)";
+    if(!confirm(`Save ${tagMsg} — ${action}?`)) {
+        return; 
+    }
+
+    // Lock the button — can't double-submit
+    isSubmittingDoctoring = true;
+    submitBtn.disabled = true;
+    submitBtn.style.opacity = '0.6';
+
+    // Preserve original time when editing; new records get current time
+    let timeStr;
+    if (editingRecordId) {
+        const orig = records.find(r => String(r.id) === String(editingRecordId));
+        if (orig && orig.dateTime && String(orig.dateTime).includes('T')) {
+            timeStr = String(orig.dateTime).split('T')[1];
+        } else {
+            timeStr = new Date().toLocaleTimeString('en-GB');
+        }
+    } else {
+        timeStr = new Date().toLocaleTimeString('en-GB');
+    }
+
+    const data = {
+        type: 'doctoring',
+        id: editingRecordId || String(Date.now()),
+        tagNumber: tag,
+        dateTime: dateTimeInput.value + "T" + timeStr,
+        location: `${prop} - ${past}`,
+        lotNumber: lotInput.value,
+        treatmentType: action,
+        medication1: med1.value, dosage1: dose1.value,
+        medication2: med2.value, dosage2: dose2.value,
+        medication3: med3.value, dosage3: dose3.value,
+        drugOff: action === 'Dead' ? (drugOffInput.value || '') : '',
+        notes: document.getElementById('notes').value,
+        recordedBy: recordedByInput.value.trim()
+    };
+    
+    const wasEditing = !!editingRecordId;
+    if (editingRecordId) {
+        records = records.map(r => String(r.id) === String(editingRecordId) ? data : r);
+        editingRecordId = null;
+        submitBtn.innerText = "Save Record"; submitBtn.style.backgroundColor = "#34c759";
+    } else {
+        records.unshift(data);
+    }
+    
+    safeSetItem('betaCattleRecords', JSON.stringify(records));
+    safeSetItem('crewMemberName', recordedByInput.value.trim());
+
+    pushToCloud(data);
+
+    // Capture locked values BEFORE reset so we can put them back
+    const lockedSnapshot = snapshotLockedValues();
+
+    doctoringForm.reset();
+    clearMissingFields();
+    setCurrentDateTime();
+    recordedByInput.value = localStorage.getItem('crewMemberName'); 
+    
+    tagNumberInput.dispatchEvent(new Event('input'));
+
+    // Restore any locked fields so the crew doesn't re-enter them
+    restoreLockedValues(lockedSnapshot);
+
+    // Hide meds section if Action wasn't locked (or if locked Action was Dead)
+    updateFormVisibility(treatmentTypeInput.value);
+
+    // Refresh banner so the displayed values match the restored fields
+    updateChuteBanner();
+
+    showToast(`✓ Saved: ${tagMsg}`, 'success', 1800);
+    updateDailySummary();
+
+    // In chute mode (any lock active), the next animal needs only a tag.
+    // Auto-open the keypad so it's one less tap per animal (touch devices only).
+    // Skip after edits — user finished editing, not advancing to a new animal.
+    const inChuteMode = locks.ranch || locks.pasture || locks.lot || locks.action;
+    if (!wasEditing && inChuteMode && isTouchPrimary) {
+        setTimeout(() => openKeypad(), 250);
+    } else if (!wasEditing && inChuteMode) {
+        // Desktop: just focus the field so they can start typing
+        setTimeout(() => tagNumberInput.focus(), 250);
+    }
+
+    // Re-enable after short cooldown
+    setTimeout(() => {
+        isSubmittingDoctoring = false;
+        submitBtn.disabled = false;
+        submitBtn.style.opacity = '1';
+    }, 600);
+};
+
+document.getElementById('recallLocationBtn').onclick = function() {
+    const r = records[0];
+    if (r && r.location && r.location.includes(" - ")) {
+        const parts = r.location.split(" - ");
+        const prop = String(parts[0]).trim();
+        const past = String(parts[1]).trim();
+        
+        propertyInput.value = prop;
+        pastureInput.innerHTML = `<option value="${past}">${past}</option>`;
+        pastureInput.value = past;
+        pastureInput.disabled = false;
+    }
+};
+
+document.getElementById('recallLotBtn').onclick = function() {
+    const r = records[0];
+    if (r && r.lotNumber) lotInput.value = r.lotNumber;
+};
+
+document.getElementById('recallActionBtn').onclick = function() {
+    const r = records[0];
+    if (r && r.treatmentType) treatmentTypeInput.value = r.treatmentType;
+};
+
+// =========================================================
+// TABLE RENDERING (Only shown on History Tab)
+// =========================================================
+// How far back the history tab reaches. Two days was too short to be
+// useful: a move entered on Saturday had already dropped off the list by
+// Monday morning, which is exactly when somebody notices it needs fixing.
+// A week covers a weekend plus the Monday it gets looked at.
+const HISTORY_DAYS = 7;
+
+function getHistoryCutoff() {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - (HISTORY_DAYS - 1));
+    return d;
+}
+
+function updateRecentList() {
+    recordTableBody.innerHTML = '';
+    const cutoff = getHistoryCutoff();
+    const recentRecords = records.filter(r => {
+        if (!r.dateTime) return false;
+        const recDate = new Date(r.dateTime.split('T')[0] + "T00:00:00");
+        return recDate >= cutoff;
+    });
+
+    recentRecords.forEach(r => renderDoctoringRow(r));
+    tableContainer.style.display = recentRecords.length > 0 ? 'block' : 'none';
+}
+
+function updateMovesList() {
+    movesTableBody.innerHTML = '';
+    const cutoff = getHistoryCutoff();
+    const recentMoves = movesRecords.filter(m => {
+        if (!m.date) return false;
+        const mDate = new Date(m.date.split('T')[0] + "T00:00:00");
+        return mDate >= cutoff;
+    });
+
+    recentMoves.forEach(m => renderMoveRow(m));
+    movesTableContainer.style.display = recentMoves.length > 0 ? 'block' : 'none';
+}
+
+function renderDoctoringRow(r) {
+    const tr = document.createElement('tr');
+    const drugOffTag = r.drugOff ? `<b style="color:#d70015;">[Drug off: ${r.drugOff}]</b> ` : '';
+    tr.innerHTML = `
+        <td><b>${r.tagNumber}</b> ${statusCell(r)}</td>
+        <td>${String(r.dateTime).replace('T', ' ')}</td>
+        <td>${r.treatmentType}</td>
+        <td>${r.location}</td>
+        <td>${r.medication1} <small>${r.dosage1}</small></td>
+        <td>${drugOffTag}${r.notes || ''}</td>
+        <td>${rowActions(r, 'doctoring')}</td>
+    `;
+    recordTableBody.appendChild(tr);
+}
+
+// An approved entry is in the books: the server refuses any change to its
+// raw payload, so Edit and Del are shown disabled with the reason rather
+// than offered and then rejected.
+function statusCell(rec) {
+    if (rec._status === 'approved') return '<span class="row-status approved">in books</span>';
+    if (rec._status === 'rejected') return '<span class="row-status rejected">rejected</span>';
+    return '';
+}
+
+function rowActions(rec, kind) {
+    if (rec._status === 'approved') {
+        return '<span class="muted" style="font-size:11px;">approved &mdash; office only</span>';
+    }
+    return `
+            <div class="action-buttons">
+                <button type="button" class="edit-btn" title="Load this record into the form to edit it." onclick="${kind === 'move' ? 'editMoveLocal' : 'editLocal'}('${rec.id}')">Edit</button>
+                <button type="button" id="del-${rec.id}" class="delete-btn" title="Delete this record. You'll be asked to confirm." onclick="confirmDelete('${rec.id}', '${kind}')">Del</button>
+            </div>`;
+}
+
+function renderMoveRow(m) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+        <td>${m.date} ${statusCell(m)}</td>
+        <td>${m.fromRanch} - ${m.fromPasture}</td>
+        <td>${m.toRanch} - ${m.toPasture}</td>
+        <td>${Array.isArray(m.lotSplit) && m.lotSplit.length
+                ? m.lotSplit.map(x => `<b>${x.lot}</b> ${x.head}`).join('<br>')
+                : (m.lotNumber ? '<b>' + m.lotNumber + '</b>' : '<span class="muted">not said</span>')}</td>
+        <td>${m.headCount || '0'}</td>
+        <td>${m.notes || '-'}</td>
+        <td>${rowActions(m, 'move')}</td>
+    `;
+    movesTableBody.appendChild(tr);
+}
+
+window.editLocal = function(id) {
+    const r = records.find(rec => String(rec.id) === String(id));
+    if (!r) return;
+    if (r._status === 'approved') {
+        showToast('Already approved and in the books — ask the office to change it', 'error', 4000);
+        return;
+    }
+
+    editingRecordId = String(id);
+    switchTab('doctoring');
+    
+    tagNumberInput.value = r.tagNumber;
+    dateTimeInput.value = r.dateTime ? String(r.dateTime).split('T')[0] : '';
+    treatmentTypeInput.disabled = false;
+    
+    if (r.lotNumber) {
+        let exists = Array.from(lotInput.options).some(opt => opt.value === r.lotNumber);
+        if (!exists) lotInput.innerHTML += `<option value="${r.lotNumber}">${r.lotNumber}</option>`;
+        lotInput.value = r.lotNumber;
+    }
+
+    treatmentTypeInput.value = r.treatmentType;
+    updateFormVisibility(r.treatmentType);
+    if (r.treatmentType === 'Dead') {
+        drugOffInput.value = r.drugOff || '';
+    }
+    
+    if (r.location && r.location.includes(" - ")) {
+        const parts = r.location.split(" - ");
+        const prop = String(parts[0]).trim();
+        const past = String(parts[1]).trim();
+        
+        propertyInput.value = prop;
+        pastureInput.innerHTML = `<option value="${past}">${past}</option>`;
+        pastureInput.value = past;
+        pastureInput.disabled = false;
+    }
+    
+    med1.value = r.medication1; dose1.value = r.dosage1;
+    med2.value = r.medication2; dose2.value = r.dosage2;
+    document.getElementById('notes').value = r.notes;
+    
+    submitBtn.innerText = "Update Record";
+    submitBtn.style.backgroundColor = "#ffcc00";
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+
+// =========================================================
+// DAY'S ACTIVITY REPORT
+//
+// What happened on the ranch on one day - everyone's work, not this
+// phone's. Built for the head man staying current without waiting on the
+// office.
+//
+// It merges two sources because neither is enough on its own:
+//
+//   - The BOOKS (doctoring_events, lot_movements, deaths in lot_events).
+//     These hold approved work, whatever its origin, so office-entered
+//     work shows up here too.
+//   - STAGED entries not yet approved. This is the important half: at the
+//     hour anyone actually looks, most of the day's work is still sitting
+//     in pending_field_entries. A books-only report would show an empty
+//     afternoon and be worse than useless.
+//
+// No dedupe is needed. An approved staged row IS its book row, so only
+// pending and rejected staged rows are carried as report lines; approved
+// ones are kept aside purely to recover who did the work.
+//
+// Everything is as of the last Pull Cloud History, and says so. A phone
+// with no signal shows the last pull's picture rather than an empty day,
+// because an empty day and no data are not the same thing.
+// =========================================================
+const REPORT_DAYS = 7;
+
+// The rest of this file interpolates values straight into template
+// literals. The report renders free text - the office's review notes and
+// the cowboy's own notes - so it escapes rather than trusting them.
+function escapeHtml(v) {
+    return String(v == null ? '' : v)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+const DAY_REPORT_KEY = 'betaCattleDayReport';
+
+let dayReport = loadJSON(DAY_REPORT_KEY, null);
+let dayReportDay = null;   // which day the modal is showing
+
+function localDay(d) {
+    const p = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+function dayReportLabel(day) {
+    const d = new Date(day + 'T00:00:00');
+    if (isNaN(d.getTime())) return day;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const diff = Math.round((today - d) / 86400000);
+    const base = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+    if (diff === 0) return base + ' · today';
+    if (diff === 1) return base + ' · yesterday';
+    return base;
+}
+
+// Tags are text and may be "NT3", so a plain sort puts 8402 before 8310.
+function drCompareTags(a, b) {
+    const na = parseInt(a, 10), nb = parseInt(b, 10);
+    const aNum = !isNaN(na) && /^\d+$/.test(String(a || '').trim());
+    const bNum = !isNaN(nb) && /^\d+$/.test(String(b || '').trim());
+    if (aNum && bNum) return na - nb;
+    if (aNum !== bNum) return aNum ? -1 : 1;
+    return String(a || '').localeCompare(String(b || ''));
+}
+
+// ---- Built during pullCloudData, from the four report queries ----------
+function buildDayReport(docRows, moveRows, deadRows, stagedRows, pastureLabelById) {
+    const rows = [];
+    const notTest = r => !(r.lots && r.lots.is_test);
+    const pastureOf = id => pastureLabelById[id] || '(pasture not recorded)';
+
+    // Who actually did the work. The posted row carries the office user who
+    // approved it, so the cowboy's name has to come off the staged entry.
+    const whoByRowId = {}, whoByClientId = {};
+    (stagedRows || []).forEach(e => {
+        const who = e.raw && e.raw.recordedBy;
+        if (!who) return;
+        if (e.client_id) whoByClientId[String(e.client_id)] = who;
+        // approved_ref is an array for a multi-lot move (one movement per
+        // lot); reading only .id would lose the crew name on those rows.
+        [].concat(e.approved_ref || []).forEach(ref => {
+            if (ref && ref.id) whoByRowId[String(ref.id)] = who;
+        });
+    });
+    const bookWho = (row) =>
+        whoByRowId[String(row.id)] ||
+        (row.legacy_id ? whoByClientId[String(row.legacy_id)] : '') ||
+        'Office';
+
+    (docRows || []).filter(notTest).forEach(d => {
+        const meds = (d.doctoring_event_meds || [])
+            .slice().sort((a, b) => (a.position || 0) - (b.position || 0))
+            .map(m => {
+                const name = (m.medications && m.medications.name) || m.medication_name_freetext || '(unnamed)';
+                return name + (m.dose_cc != null ? ' ' + Number(m.dose_cc) + 'cc' : '');
+            });
+        const when = new Date(d.event_datetime);
+        rows.push({
+            kind: (d.field_actions && d.field_actions.is_dead) ? 'dead' : 'doctoring',
+            day: localDay(when),
+            when: d.event_datetime,
+            timeLabel: when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+            lot: (d.lots && d.lots.lot_number) || '(lot not set)',
+            pasture: pastureOf(d.pasture_id),
+            tag: d.no_tag ? 'NT' : (d.tag_number || 'NT'),
+            action: (d.field_actions && d.field_actions.name) || 'Doctoring',
+            detail: meds.join(', '),
+            head: null,
+            who: bookWho(d),
+            status: 'posted',
+            statusNote: '',
+            flags: []
+        });
+    });
+
+    (moveRows || []).filter(notTest).forEach(m => {
+        rows.push({
+            kind: 'move',
+            day: m.move_date,
+            when: m.move_date,
+            timeLabel: '',
+            lot: (m.lots && m.lots.lot_number) || '(lot not set)',
+            pasture: pastureOf(m.from_pasture_id),
+            tag: '',
+            action: 'Move',
+            detail: '→ ' + pastureOf(m.to_pasture_id),
+            head: m.head_count != null ? m.head_count : null,
+            who: bookWho(m),
+            status: 'posted',
+            statusNote: '',
+            flags: (m.head_count == null || m.head_count <= 0) ? ['uncounted'] : []
+        });
+    });
+
+    (deadRows || []).filter(notTest).forEach(d => {
+        const notHauled = /carcass hauled off:\s*(no|not answered)/i.test(String(d.notes || ''));
+        rows.push({
+            kind: 'dead',
+            day: d.event_date,
+            when: d.event_date,
+            timeLabel: '',
+            lot: (d.lots && d.lots.lot_number) || '(lot not set)',
+            pasture: pastureOf(d.pasture_id),
+            tag: d.tag_number || 'NT',
+            action: 'Dead',
+            detail: d.cause ? String(d.cause) : '',
+            head: d.head_count != null ? d.head_count : 1,
+            who: bookWho(d),
+            status: 'posted',
+            statusNote: '',
+            flags: notHauled ? ['not hauled off'] : []
+        });
+    });
+
+    // Staged rows that are NOT in the books yet. Approved ones were used
+    // above for names only; carrying them again would double every line.
+    (stagedRows || [])
+        .filter(e => e.status === 'pending' || e.status === 'rejected')
+        .forEach(e => {
+            const raw = e.raw || {};
+            const isMove = e.entry_type === 'move';
+            const stamp = e.event_datetime || (isMove ? raw.date : raw.dateTime);
+            const when = stamp ? new Date(stamp) : null;
+            const status = e.status === 'rejected' ? 'sent back' : 'waiting';
+            const meds = [];
+            for (let i = 1; i <= 3; i++) {
+                const name = raw['medication' + i], dose = raw['dosage' + i];
+                if (!name && !dose) continue;
+                meds.push(String(name || '(unnamed)') + (dose ? ' ' + dose + 'cc' : ''));
+            }
+            const head = parseInt(raw.headCount, 10);
+            const notHauled = String(raw.treatmentType || '').toLowerCase() === 'dead' &&
+                              String(raw.drugOff || '').toLowerCase() !== 'yes';
+            rows.push({
+                kind: isMove ? 'move'
+                    : (String(raw.treatmentType || '').toLowerCase() === 'dead' ? 'dead' : 'doctoring'),
+                day: when && !isNaN(when.getTime()) ? localDay(when) : '',
+                when: stamp || '',
+                timeLabel: when && !isNaN(when.getTime()) && !isMove
+                    ? when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '',
+                lot: raw.lotNumber || (isMove ? '(lot not picked)' : '(lot not set)'),
+                pasture: isMove
+                    ? `${raw.fromRanch || ''} - ${raw.fromPasture || ''}`.trim()
+                    : (raw.location || '(pasture not recorded)'),
+                tag: isMove ? '' : (raw.tagNumber || 'NT'),
+                action: isMove ? 'Move' : (raw.treatmentType || 'Doctoring'),
+                detail: isMove
+                    ? `→ ${raw.toRanch || ''} - ${raw.toPasture || ''}`.trim()
+                    : meds.join(', '),
+                head: isMove ? (isNaN(head) ? null : head) : null,
+                who: raw.recordedBy || '',
+                status,
+                statusNote: e.status === 'rejected' ? (e.review_notes || '') : '',
+                flags: (isMove && (isNaN(head) || head <= 0) ? ['uncounted'] : [])
+                       .concat(notHauled ? ['not hauled off'] : [])
+            });
+        });
+
+    return { pulledAt: new Date().toISOString(), days: REPORT_DAYS, rows };
+}
+
+// ---- Rendering ---------------------------------------------------------
+const DR_KINDS = [
+    { key: 'doctoring', label: 'Doctoring' },
+    { key: 'move', label: 'Moves' },
+    { key: 'dead', label: 'Dead' }
+];
+
+function renderDayReport() {
+    const body = document.getElementById('reportContent');
+    const title = document.getElementById('reportDayLabel');
+    if (!dayReportDay) dayReportDay = localDay(new Date());
+    if (title) title.textContent = dayReportLabel(dayReportDay);
+
+    // Never signed on, or never pulled. An empty day and no data at all are
+    // different answers and must not look the same.
+    if (!dayReport || !Array.isArray(dayReport.rows)) {
+        body.innerHTML = `<p class="dr-empty">No activity loaded yet.<br>
+            Tap <b>🔄 Pull Cloud History</b> when you have signal.</p>`;
+        return;
+    }
+
+    const oldest = new Date(); oldest.setHours(0, 0, 0, 0);
+    oldest.setDate(oldest.getDate() - ((dayReport.days || REPORT_DAYS) - 1));
+    const beyond = dayReportDay < localDay(oldest);
+
+    const nextBtn = document.getElementById('drNextDay');
+    const prevBtn = document.getElementById('drPrevDay');
+    if (nextBtn) nextBtn.disabled = dayReportDay >= localDay(new Date());
+    if (prevBtn) prevBtn.disabled = dayReportDay <= localDay(oldest);
+
+    const forDay = dayReport.rows.filter(r => r.day === dayReportDay);
+    const pulled = dayReport.pulledAt ? new Date(dayReport.pulledAt) : null;
+    const stamp = pulled
+        ? `As of ${pulled.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${pulled.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+        : 'As of the last pull';
+
+    let html = `<div class="dr-stamp">${stamp} · pull again for anything newer</div>`;
+
+    if (beyond) {
+        html += `<p class="dr-empty">The app only keeps the last ${dayReport.days || REPORT_DAYS} days.<br>
+            Ask the office for anything older.</p>`;
+        body.innerHTML = html;
+        return;
+    }
+
+    const waiting = forDay.filter(r => r.status === 'waiting').length;
+    const sentBack = forDay.filter(r => r.status === 'sent back').length;
+    const counts = DR_KINDS.map(k => ({ ...k, n: forDay.filter(r => r.kind === k.key).length }));
+
+    html += `<div class="dr-chips">` +
+        counts.map(c => `<span class="dr-chip${c.key === 'dead' && c.n ? ' dead' : ''}">${c.n} ${c.key === 'dead' ? 'dead' : c.label.toLowerCase()}</span>`).join('') +
+        (waiting ? `<span class="dr-chip waiting">${waiting} waiting on the office</span>` : '') +
+        (sentBack ? `<span class="dr-chip sentback">${sentBack} sent back</span>` : '') +
+        `</div>`;
+
+    if (!forDay.length) {
+        html += `<p class="dr-empty">Nothing recorded for this day.</p>`;
+        body.innerHTML = html;
+        return;
+    }
+
+    DR_KINDS.forEach(k => {
+        const of = forDay.filter(r => r.kind === k.key);
+        if (!of.length) return;
+        html += `<div class="dr-section"><h3>${k.label} (${of.length})</h3>`;
+
+        const byLot = {};
+        of.forEach(r => {
+            (byLot[r.lot] = byLot[r.lot] || {});
+            (byLot[r.lot][r.pasture] = byLot[r.lot][r.pasture] || []).push(r);
+        });
+        Object.keys(byLot).sort().forEach(lot => {
+            Object.keys(byLot[lot]).sort().forEach(pasture => {
+                const lotLabel = lot.startsWith('(') ? lot.slice(1, -1) : 'Lot ' + lot;
+                html += `<div class="dr-group">${escapeHtml(lotLabel)} · ${escapeHtml(pasture)}</div>`;
+                byLot[lot][pasture]
+                    .sort((a, b) => drCompareTags(a.tag, b.tag) || String(a.when).localeCompare(String(b.when)))
+                    .forEach(r => { html += dayReportCard(r); });
+            });
+        });
+        html += `</div>`;
+    });
+
+    body.innerHTML = html;
+}
+
+function dayReportCard(r) {
+    const badge = r.status === 'posted' ? ''
+        : `<span class="dr-badge ${r.status === 'waiting' ? 'waiting' : 'sentback'}">${r.status === 'waiting' ? 'waiting on the office' : 'sent back'}</span>`;
+    const bits = [];
+    if (r.detail) bits.push(escapeHtml(r.detail));
+    if (r.head != null) bits.push(`<b>${r.head} hd</b>`);
+    const flags = r.flags.map(f =>
+        `<span class="dr-flag${f === 'not hauled off' ? ' danger' : ''}">${escapeHtml(f)}</span>`).join(' ');
+
+    return `<div class="dr-card ${r.kind === 'dead' ? 'dead' : ''}">
+        <div class="dr-row">
+            ${r.tag ? `<span class="dr-tag">${escapeHtml(r.tag)}</span>` : ''}
+            <span class="dr-action">${escapeHtml(r.action)}</span>
+            <span class="dr-when">${escapeHtml(r.timeLabel)}</span>
+        </div>
+        ${bits.length ? `<div class="dr-detail">${bits.join(' · ')}</div>` : ''}
+        <div class="dr-foot">${escapeHtml(r.who || '')}${badge}${flags}</div>
+        ${r.statusNote ? `<div class="dr-note">Office: ${escapeHtml(r.statusNote)}</div>` : ''}
+    </div>`;
+}
+
+function shiftDayReport(days) {
+    const base = new Date((dayReportDay || localDay(new Date())) + 'T00:00:00');
+    base.setDate(base.getDate() + days);
+    const next = localDay(base);
+    if (next > localDay(new Date())) return;   // no reports from the future
+    const oldest = new Date(); oldest.setHours(0, 0, 0, 0);
+    oldest.setDate(oldest.getDate() - (((dayReport && dayReport.days) || REPORT_DAYS) - 1));
+    if (next < localDay(oldest)) return;       // nothing cached that far back
+    dayReportDay = next;
+    renderDayReport();
+}
+
+document.getElementById('openReportBtn').onclick = function() {
+    dayReportDay = localDay(new Date());
+    renderDayReport();
+    openAppModal('reportModal');
+};
+document.getElementById('drPrevDay').onclick = () => shiftDayReport(-1);
+document.getElementById('drNextDay').onclick = () => shiftDayReport(1);
+
+document.getElementById('closeModalBtn').onclick = () => closeAppModal('reportModal');
+
+function setCurrentDateTime() { dateTimeInput.valueAsDate = new Date(); }
+function updateFormVisibility(type) {
+    const hasAction = type && type !== '';
+    const isDead = type === 'Dead';
+    // Show meds only when an action calls for them (not Dead, not empty)
+    document.getElementById('medicationsSection').style.display = (hasAction && !isDead) ? 'block' : 'none';
+    drugOffGroup.style.display = isDead ? 'block' : 'none';
+    if (!isDead) drugOffInput.value = '';
+}
+
+// Display Records for Search Bar
+function displayRecords(filter = '', exact = false) {
+    if (!filter) { 
+        updateRecentList();
+        movesTableContainer.style.display = 'block'; 
+        return; 
+    }
+    movesTableContainer.style.display = 'none'; 
+    recordTableBody.innerHTML = '';
+    const filtered = records.filter(r => exact ? String(r.tagNumber) === filter : String(r.tagNumber).includes(filter));
+    if (filtered.length === 0) { tableContainer.style.display = 'none'; return; }
+    tableContainer.style.display = 'block';
+    filtered.forEach(r => renderDoctoringRow(r));
+}
+document.getElementById('searchInput').addEventListener('input', (e) => displayRecords(e.target.value));
+
+// =========================================================
+// HELP & TROUBLESHOOTING MODALS
+// =========================================================
+const helpModal = document.getElementById('helpModal');
+const troubleModal = document.getElementById('troubleModal');
+
+document.getElementById('helpBtn').addEventListener('click', () => {
+    helpModal.style.display = 'block';
+    helpModal.scrollTop = 0;
+    const content = helpModal.querySelector('.modal-content');
+    if (content) content.scrollTop = 0;
+});
+
+// =========================================================
+// RESET APP DATA
+// =========================================================
+// Walking a cowboy through Settings -> Safari -> Advanced -> Website Data
+// is not realistic in a pasture, so the app resets itself.
+//
+// Scoped on purpose: it clears only this app's own betaCattle* keys. The
+// office app lives on the SAME ORIGIN (github.io serves both from one
+// host), and localStorage is per-origin, not per-path - so a blanket
+// localStorage.clear() would also blow away the office app's session.
+const RESET_KEYS = [
+    'betaCattleRecords', 'betaCattleMoves', 'betaCattleMeds', 'betaCattleLocs',
+    'betaCattleLots', 'betaCattleProtocols', 'betaCattleLocks',
+    'betaCattleBooksHistory', 'betaCattleTagLocations', 'betaCattleTagLots',
+    'betaCattleTagRanges', 'betaCattleTagCandidates', 'betaCattlePastureLots',
+    'betaCattleSyncQueue', 'betaCattleTombstones', 'betaCattleRejected',
+    'betaLastSyncDate', 'betaCattleDataVersion', 'betaCattleDayReport'
+    // 'crewMemberName' is deliberately kept - it is a convenience, not state,
+    // and retyping it is pure friction.
+    // 'betaCattleFailed' (the Failed list) is deliberately kept: those are
+    // entries the office never received, and a reset must not destroy them.
+];
+
+function refreshResetState() {
+    const status = document.getElementById('resetStatus');
+    const btn = document.getElementById('resetAppBtn');
+    if (!status || !btn) return;
+
+    const queued = syncQueue.length;
+    if (queued > 0) {
+        // Resetting now would destroy work the office has never seen.
+        status.textContent = `\u26a0 ${queued} record(s) still waiting to sync. Get signal and let the queue clear first.`;
+        status.className = 'reset-note blocked';
+        btn.disabled = true;
+    } else {
+        status.textContent = '\u2713 Nothing waiting to sync — safe to reset.';
+        status.className = 'reset-note ready';
+        btn.disabled = false;
+    }
+}
+
+async function resetAppData(opts) {
+    opts = opts || {};
+    // Re-check at the moment of the tap, not just when the modal opened.
+    // `force` is the locked-out path: someone stuck at the login screen has
+    // no way to drain the queue, so losing it beats a phone that cannot work
+    // at all — but only after they have been told, in the caller.
+    if (syncQueue.length > 0 && !opts.force) {
+        showToast(`\u26d4 ${syncQueue.length} record(s) still unsent. Reset blocked.`, 'error', 4000);
+        refreshResetState();
+        return;
+    }
+
+    if (!opts.skipConfirm && !confirm(
+        'Reset app data?\n\n' +
+        'Clears this phone\'s saved records, lists and settings, then reloads a ' +
+        'fresh copy.\n\nNothing is removed from the ranch database — Pull Cloud ' +
+        'History brings your entries back.'
+    )) return;
+
+    const btn = document.getElementById('resetAppBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Resetting…'; }
+
+    try {
+        RESET_KEYS.forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
+
+        // Drop the cached app shell, otherwise the reload just serves the
+        // same stale build back and the reset appears to do nothing.
+        if ('caches' in window) {
+            const names = await caches.keys();
+            await Promise.all(names.filter(n => n.startsWith('beta-cattle')).map(n => caches.delete(n)));
+        }
+
+        // Unregister the worker so the next load fetches a fresh one rather
+        // than waking the old one from its own cache.
+        if ('serviceWorker' in navigator) {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(regs.map(r => r.unregister()));
+        }
+    } catch (err) {
+        // Never leave the user staring at a dead button — say what happened.
+        console.error('reset error:', err);
+        alert('Reset hit a problem: ' + (err.message || err) +
+              '\n\nThe app will reload anyway. If it still looks wrong, clear ' +
+              'website data in your browser settings.');
+    }
+
+    // Cache-busted so the reload cannot be answered from the HTTP cache.
+    window.location.replace(window.location.pathname + '?reset=' + Date.now());
+}
+
+document.getElementById('resetAppBtn').addEventListener('click', resetAppData);
+
+// NOTE: the Reset button on the LOGIN screen is wired by the inline script in
+// index.html, not here. It has to work when this file has failed to run, which
+// is exactly when someone is locked out and needs it.
+
+document.getElementById('troubleshootBtn').addEventListener('click', () => {
+    refreshResetState();
+    troubleModal.style.display = 'block';
+    const content = troubleModal.querySelector('.modal-content');
+    if (content) content.scrollTop = 0;
+});
+
+window.closeHelp = () => { helpModal.style.display = 'none'; };
+window.closeTrouble = () => { troubleModal.style.display = 'none'; };
+
+// Tap backdrop to dismiss
+helpModal.addEventListener('click', (e) => {
+    if (e.target === helpModal) closeHelp();
+});
+troubleModal.addEventListener('click', (e) => {
+    if (e.target === troubleModal) closeTrouble();
+});
+
+// =========================================================
+// AUTH GATE
+// =========================================================
+// Nothing in the app is usable until Supabase confirms a session — the
+// staging table is the only thing this app can write to, and every row
+// has to be stamped with a real user id.
+const loginScreen = document.getElementById('loginScreen');
+const loginForm = document.getElementById('loginForm');
+const loginBtn = document.getElementById('loginBtn');
+const loginAlert = document.getElementById('loginAlert');
+const userChip = document.getElementById('userChip');
+
+function showLoginError(msg) {
+    loginAlert.textContent = msg;
+    loginAlert.style.display = 'block';
+}
+
+async function onSignedIn(user) {
+    currentUserId = user.id;
+
+    // A user can authenticate but have no profile row, in which case
+    // current_user_role() returns null and every insert would be refused
+    // by RLS. Catch that here rather than letting saves fail in a pasture.
+    //
+    // Three outcomes, deliberately kept apart. The first version of this
+    // treated all three as "no profile", signed the user out and told them
+    // their account was broken - so one weak-signal request locked someone
+    // out of an offline-first app, with no session left to retry with.
+    const { data: profile, error } = await sb
+        .from('user_profiles')
+        .select('full_name, role, is_active')
+        .eq('id', user.id)
+        .maybeSingle();
+
+    // 1. Could not ASK. That is not the same as being told no. Keep the
+    //    session; it is the only way back in without signal.
+    if (error) {
+        currentUserId = null;
+        showLoginError(`Couldn't reach the ranch database (${error.code || error.message || 'network'}). ` +
+                       `Check signal and try again — your account is fine.`);
+        loginBtn.disabled = false;
+        return;
+    }
+
+    // 2. Asked, and there is genuinely no profile for this account.
+    if (!profile) {
+        currentUserId = null;
+        await sb.auth.signOut();
+        showLoginError(`Signed in as ${user.email || 'this account'}, but it has no ranch profile. ` +
+                       `Ask the office to add one.`);
+        loginBtn.disabled = false;
+        return;
+    }
+
+    // 3. Profile exists but has been switched off.
+    if (!profile.is_active) {
+        currentUserId = null;
+        await sb.auth.signOut();
+        showLoginError(`The account ${user.email || ''} has been deactivated. Ask the office to turn it back on.`);
+        loginBtn.disabled = false;
+        return;
+    }
+
+    currentProfile = profile;
+    loginScreen.style.display = 'none';
+    userChip.style.display = 'flex';
+    document.getElementById('userChipName').textContent = `${profile.full_name} · ${profile.role}`;
+
+    // Default the crew-member field to the signed-in name when the phone
+    // has no saved name yet.
+    if (!recordedByInput.value) {
+        recordedByInput.value = profile.full_name;
+        moveRecordedByInput.value = profile.full_name;
+    }
+
+    startApp();
+}
+
+function showLoginScreen() {
+    currentUserId = null; currentProfile = null;
+    loginScreen.style.display = 'flex';
+    userChip.style.display = 'none';
+}
+
+loginForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    loginAlert.style.display = 'none';
+    loginBtn.disabled = true;
+    loginBtn.textContent = 'Signing in…';
+    try {
+        const { data, error } = await sb.auth.signInWithPassword({
+            email: document.getElementById('loginEmail').value.trim(),
+            password: document.getElementById('loginPassword').value
+        });
+        if (error) {
+            // Include the status/code — "Invalid login credentials" and a
+            // server fault look identical to a user otherwise.
+            showLoginError(`${error.message}${error.status ? ` (${error.status})` : ''}`);
+            loginBtn.disabled = false;
+        }
+        else await onSignedIn(data.user);
+    } catch (err) {
+        showLoginError(err.message || 'Sign-in failed. Check signal and try again.');
+        loginBtn.disabled = false;
+    }
+    loginBtn.textContent = 'Sign in';
+});
+
+document.getElementById('logoutBtn').addEventListener('click', async () => {
+    // Anything still queued would have nobody to submit as after sign-out.
+    if (syncQueue.length > 0 &&
+        !confirm(`${syncQueue.length} record(s) still waiting to sync. Sign out anyway?`)) return;
+    await sb.auth.signOut();
+    showLoginScreen();
+});
+
+// Init — the parts that are safe before a session exists.
+setCurrentDateTime();
+updateDataLists();
+updateSyncBadge();
+updateDailySummary();
+updateChuteBanner();
+
+// The rest waits until we know who is signed in.
+function startApp() {
+    updateDataLists();
+    updateSyncBadge();
+    updateDailySummary();
+    if (navigator.onLine) processSyncQueue();
+    checkDailySync();
+}
+
+(async function bootstrap() {
+    try {
+        const { data: { session } } = await sb.auth.getSession();
+        if (session && session.user) await onSignedIn(session.user);
+        else showLoginScreen();
+    } catch (err) {
+        // Offline on a cold start with a stored session: supabase-js reads
+        // the session from localStorage, so this only trips on a genuinely
+        // broken client. Fail closed rather than pretending to be signed in.
+        console.error('bootstrap error:', err);
+        showLoginScreen();
+    }
+})();

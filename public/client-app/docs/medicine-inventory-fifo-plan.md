@@ -1,0 +1,1930 @@
+# Medicine inventory — FIFO plan
+
+Purchases, usage, shrink and ending inventory for medications, on FIFO, with an
+efficiency number for crew doctoring and for the buyers who process our cattle.
+
+Drafted 2026-08-26, updated 2026-08-27. **Plan only — nothing here is built yet.**
+
+Decisions taken by John:
+
+| | |
+|---|---|
+| Costing | **FIFO becomes the books.** Treatment *and* processing cost come out of inventory, not out of `medications.cost_per_unit`. |
+| Crew usage | **One shared crew location, custody tracked per person.** Issues are checked out to a named crew member; a periodic count trues the location up. Nothing new for the field app. |
+| Buyer meds | **Each buyer is a stock location.** Supplier invoice receives into their account; expected usage comes from head processed × protocol. |
+| Go-live | **Opening count, soft target 2026-09-01**, subject to build speed. No backfill. |
+| Invoice intake | **Cowork paste or hand entry, into the same grid** (John, 2026-08-27). The grid is the screen; paste fills it, typing fills it, and either way it must tie to the invoice total before it posts. |
+| Build | **As simple as it can be and still be right** (John, 2026-08-27). One stock pool for the ranch, no transfers, five transaction types, three RPCs. |
+| Where inventory lives | **Full inventory runs in the office app** (John, 2026-08-27). Redwing is a periodic cross-check, not the authority we defer to. |
+| Redwing | **Redwing is the GL; this is the subsidiary ledger.** Date-ranged report in the Sales accounting-report format; weekly vs monthly becomes a picker, not a schema decision. |
+
+The module lives entirely in the office app (`index.html`). The field app is
+not touched.
+
+---
+
+## Decisions from the design review (2026-08-29)
+
+A question-by-question walk of the design tree. These supersede anything
+earlier in this document that disagrees with them.
+
+### Scope and catalog
+
+1. **Everything in `medications` is inventory** — drugs, implants, and the three
+   tag products — with a per-medication **`track_inventory`** flag to switch off
+   anything not worth counting. The flag cannot be retrofitted: once counts
+   exist, changing what is in scope changes what past counts meant.
+2. **A medication with no container size is flagged, not stocked.** Synovex
+   Primer, Protivity and Dexamethasone have no `bottle_size`. They show on the
+   inventory screens saying so, a purchase line for them will not post, and they
+   are left off the printed count sheet until fixed. Doctoring is never blocked:
+   `dose_cc` is already in base units, so doses still record — they just show as
+   uncovered until the medication is set up and stocked.
+
+### The count
+
+3. **A posted count hard-locks its location on and before the count date.** A
+   purchase or adjustment dated into a locked period is refused. **Un-posting is
+   owner-only** and reverses every adjustment the count made. Without this a
+   late invoice silently rewrites a month whose shrink is already booked.
+4. **A count cannot post while doctoring entries dated on or before it are
+   unapproved.** The screen lists how many and from which days. This is the
+   trap that makes the whole thing worth building: count the shelf on the 31st
+   with the 28th's treatments still in Approvals, and the count books those
+   doses as shrink — then the approval posts them again. Two hundred units
+   recorded where a hundred moved, and **it does not wash out next month.**
+   The rhythm is: enter the count on the 31st as a draft, clear Approvals on
+   the 1st, post it dated the 31st.
+5. **The sheet has two column-pairs — barn and crew — that add to one total.**
+   Still one Ranch pool and no transfers; this is only how the count is
+   gathered, and it tells you whether shrink is sitting in the barn or in the
+   trucks, which is a stock problem versus a handling problem. **Open bottles
+   are recorded in quarters** (crew writes ½, not 250) because that is the
+   precision a man in a truck can honestly give.
+
+### Where the money goes
+
+6. **Redwing changes to match lot usage.** It allocated meds by head-days, like
+   mineral, only because nothing could say which lot got the drug. That is what
+   this replaces — the report is not a new posting, it retires an existing
+   allocation.
+7. **Shrink is allocated to lots, per medication, pro-rata by units of that
+   medication used** (largest-remainder, so the parts sum exactly — the method
+   the shipment allocation already uses). Draxxin shrink is split only across
+   lots that actually got Draxxin. Every dollar of med spend therefore lands on
+   cattle and closeout ties to the P&L. **Consequence:** a lot that shipped in
+   August receives its share when the August count posts in early September —
+   its cost moves once, then never again, because a posted count is locked.
+8. **A buyer's leftover is handled as a count on his location.** He reports what
+   is left at month end or when a lot finishes processing; the variance posts
+   as an adjustment exactly like barn shrink, allocated across the lots he
+   processed since his last count, pro-rata by **expected** usage per
+   medication. Nothing about buyers is special — same sheet, same lock, same
+   rule — and his balance is always a number a human stated rather than one
+   that compounds unwatched.
+9. **Closeout grows an "Animal health" line that opens into Processing,
+   Treatment and Shrink.** The headline is total dollars ÷ **head in** — head in
+   never moves, so lots stay comparable and the figure cannot flatter itself as
+   cattle die or ship. The drill-down keeps each component's existing
+   convention (processing per head in, treatment per live head), so no number
+   anyone already reads changes meaning; it just gains a parent.
+10. **"Shrink" keeps its name.** It is the word cattle accounting uses, and
+    naming it is what makes it something you can work to control. The app now
+    carries two shrinks — pay-weight on Sales, medicine on Inventory — on
+    different screens, which is disambiguation enough.
+
+### Custody
+
+11. **The crew is pooled for now; no per-person number yet.** Every one of the
+    1,095 doctoring events is recorded by John, because the cowboys do not have
+    logins yet — `recorded_by_user_id` currently means *who typed it in*, not
+    *who gave the shot*. A per-person custody figure built on that would be
+    nonsense. Checkouts still record a name for traceability.
+    **Superseded in part by decision 26** — logins were assumed to be the
+    trigger that would make a per-person number valid. They are not.
+
+### Timing
+
+12. **Lite in September, books switch 1 October.** Opening count in the first
+    week of September and `usage_from` set so the ledger runs for real — but
+    Redwing keeps its head-day allocation for September and closeout does not
+    change. The 9/30 count is then a dress rehearsal that can be held against
+    Redwing's September allocation, and that comparison is the only way to earn
+    trust in the number before it drives anything. Going live in October with
+    no month of operation behind it would make the first count that matters
+    also the first count ever taken.
+
+### Cost boundaries and cutover
+
+13. **Expired product is overhead, and is NOT allocated to lots.** Waste (a
+    dropped bottle) goes with count shrink, because both are handling losses on
+    cattle being worked. Expiry is an *ordering* problem — nobody's cattle
+    caused a jug to reach its date — and it is lumpy enough that one jug would
+    swamp a month. Keeping them apart keeps both signals: shrink says the crew,
+    expiry says the buying.
+14. **The pre-May-2026 receipts are a data gap, and we are NOT backfilling.**
+    Confirmed with John. Every receipt before 2026-04-27 has no receiving
+    protocol and no protocol in the system predates that date, so a backfill
+    would mean reconstructing one from old vet invoices. Five lots therefore
+    show $0.00 processing — 31-26 (1,766 hd, closed), 37X, 47-26, 37X-1, 37X-F,
+    about 2,900 head and roughly $58,000 at the ~$20/hd the newer lots run.
+    **That cost is picked up by the cost ledger instead**, and most of those
+    lots ship soon. The only change is cosmetic and worth doing: show
+    *"protocol not recorded"* rather than a bare `$0.00`, which reads as a real
+    number.
+15. **Medicine leaves the cost allocation on 1 October — split by cost DATE,
+    not by lot.** Vet invoices before the cutover stay head-day allocated;
+    from the cutover they are inventory purchases reaching lots as actual
+    usage. **Meds stay in the cost allocation for September** (John: "leave in
+    next month"). A lot running across the boundary gets allocated meds early
+    and actual usage after — correct, and unavoidable however it is cut.
+    Non-med lines on a vet invoice (fees, supplies) stay in the ledger
+    throughout.
+16. **History is held, not rewritten.** John: *"Program will hold the
+    allocations from previous months which have said cost. Will just start
+    allocating that month's actual usage going forward. Should be as close to
+    complete as possible."* Prior months keep the allocation they were closed
+    with; the switch is forward-only. That is exactly what the phase 3 snapshot
+    does — freeze what the books already said, derive nothing retroactively.
+    **"As complete as possible" is read as: treatment and processing both
+    switch on 1 October rather than staggering them.**
+
+    **The gate on that stays non-negotiable.** Before processing flips, the
+    snapshot must show every lot's processing total unchanged to the cent. If a
+    single lot moves, processing does not flip that day and treatment goes
+    alone. Completeness is the goal; a silently changed closed lot is not a
+    price worth paying for it.
+17. **A processing draw comes off the buyer's shelf when his source key matches
+    the lot's Source, and off Ranch stock otherwise.** Covers both the buyer
+    processing before delivery and a load worked at the ranch, with nobody
+    choosing per receipt. A short buyer shelf records a shortfall and flags it
+    rather than failing, same as everywhere else.
+
+### Opening balances
+
+18. **The opening count is valued at Redwing's carrying value, item by item.**
+    Your physical count sets the QUANTITY; Redwing's unit cost sets the PRICE.
+    Day one then ties to the penny by construction, so there is never a founding
+    difference nobody can explain, and everything that diverges afterwards is a
+    real transaction you can point at. FIFO runs forward from there and takes
+    over as the opening stock is used up.
+    **Prerequisite:** `medications.redwing_item_code` has to be mapped before
+    the opening count — you cannot take a per-item value without matching the
+    items. It also forces the quantity comparison on day one, when it is
+    cheapest to fix.
+19. **Buyer opening balances are established at the OCTOBER cutover, not in
+    September.** Nothing consumes a buyer's stock until processing starts
+    drawing on 1 October, so a 9/1 figure would sit untouched for a month and
+    end up overstated by whatever he actually used. Ring each buyer as part of
+    the switch, enter what he is holding as an opening count on his location,
+    priced at our last invoice for those items. His balance starts true on the
+    day it first matters, and September is free for the phone calls.
+20. **September's shrink is reported, not allocated.** The 9/30 count posts its
+    adjustments so inventory is right going into October, but the shrink is not
+    pushed onto lots and not sent to Redwing — September meds already reach lots
+    through the head-day allocation, and allocating as well would count them
+    twice. The figure exists to be looked at and held against Redwing's
+    September number, which is the entire point of the rehearsal month.
+    **Allocation to lots begins with the October count**, posted in early
+    November, on the first month meds are out of the cost ledger.
+
+### When the crew doesn't turn a number in
+
+21. **Carry the crew's last reported figure forward and flag the count as
+    estimated.** John's call over blocking. The month always closes and no fake
+    shrink is booked from stock that is sitting in a truck. The cost is that a
+    stale figure looks like a real one, so: every screen carries a **"crew last
+    actually counted"** date, and when a real crew count finally lands after
+    estimated months the catch-up variance is booked in the month it is found —
+    the period lock forbids reopening the closed ones — **labelled with the
+    period it covers**, so a month does not appear to have lost a case.
+
+22. **PARKED — "a new bottle means the old one is empty."** John's idea, and a
+    good one: when a cowboy draws another bottle of the same medication, treat
+    his previous one as finished. It stops crew holdings rolling up and gives a
+    continuous signal instead of a monthly one. It splits in two, though:
+    - **As an estimate** it is strictly better than a carried figure — crew
+      holdings become the sum of the latest checkout per person per medication,
+      refreshed every time anyone draws. Books untouched.
+    - **As a shrink trigger** it needs to know which doses came out of *that*
+      bottle, which needs per-person dose attribution — so it waits for crew
+      logins. Pooled across the whole crew it degenerates into "every
+      checked-out bottle is consumed", which is bottle-level expensing one
+      bottle late: the head-day allocation wearing a different hat.
+
+    **Revisit once there is real running experience and the cowboys have
+    logins.** Until then, decision 21 stands.
+
+### The go/no-go
+
+23. **No written threshold — judged on the numbers in early October** (John's
+    call over pre-agreed gates). The four things worth looking at are still
+    worth looking at: quantities against Redwing item by item, the roll-forward
+    tying to on-hand (asserted automatically by the tests), shrink as a share of
+    usage, and total September med dollars against the head-day allocation.
+24. **The app computes BOTH sides of the September comparison.** One report,
+    per lot: actual FIFO usage against a head-day allocation of the *same total
+    spend*, with the difference in dollars and $/hd. Because both sides come off
+    one total, every gap on the page is purely distribution — which lot was
+    really carrying the drug — and that is the thing being judged. Nothing has
+    to be extracted from Redwing, and it is ready the day September closes.
+
+    **The expected signature: the totals should land close and the per-lot split
+    should differ noticeably.** The difference is the product. If the *totals*
+    disagree, something is wrong and it wants finding before the switch, not
+    after.
+
+### Crew members are names, not accounts
+
+25. **A crew member is a row on a list; an app login is optional** (John,
+    2026-08-29). Some hands are regulars who will get field-app accounts; some
+    come occasionally and should never see field-app information at all. Both
+    need to be checked out to, and the office or the head crew leader enters on
+    their behalf.
+
+    So `med_txns` points at a **`med_crew_members`** row — name, active, and a
+    *nullable* link to a `user_profiles` account — rather than at a user id.
+    When a member has an account and crew logins arrive, per-person dose
+    attribution works for him; for the hands without one it never will, and the
+    design should not pretend otherwise. This also settles the picker: it was
+    reading `admin_list_users`, which today returns only John and Lauren.
+
+    **The crew bottle count will be attempted near month end** rather than
+    relying on the carried estimate, so decision 21 is the fallback and not the
+    plan.
+
+### Why per-person never works, and what replaces it
+
+26. **Crew-level is the honest ceiling. `med_custody` is deleted, not hidden.**
+    John, 2026-08-29: two men work together, use meds out of *one* man's box,
+    and the *other* documents the treatment.
+
+    That breaks per-person reconciliation permanently, and logins do not fix
+    it. Logins fix *who typed it*; they do nothing about *whose box it came
+    out of*. If A carries the box and B writes the treatments up, A's checkouts
+    drain against B's records — A looks like he is losing drug and B looks like
+    he is conjuring it. Where that is the habitual pairing it is a **systematic
+    bias, not noise**, so it does not wash out over a longer window either.
+
+    **The pool is unaffected**, because it does not care whose hand the bottle
+    was in — checkouts in, doses out, the count trues the whole thing up. Only
+    the per-person split breaks.
+
+    The single thing that would fix it is recording *whose meds* at the moment
+    of treatment, and that is not worth a field-app change, an extra tap on
+    every doctoring entry, and a default that is wrong precisely when two men
+    are working together.
+
+    So: **`med_custody` is dropped** — it computes a comparison now known to be
+    invalid, and no future event makes it correct. A plain **checkout log**
+    replaces it, answering "who has bottles" and nothing more. Shrink is a crew
+    number. The plan no longer promises a per-person one.
+
+### Still open
+
+- **The Redwing posting grain** — one row per lot per period, or split by
+  medication or category. Waiting on the Redwing reports.
+- **Whether `medications.cost_per_head` is retired** once every in-scope
+  medication carries a container size and a unit cost. Two meds currently carry
+  both it and a unit cost (Ivomec Long Range, Lot Tag), where it is dead weight
+  today and a landmine if a dose is ever null.
+
+---
+
+## Why this is three phases and not one
+
+Two of those decisions are cheap and one is not.
+
+Inventory itself — purchases, issues, counts, shrink, on-hand value — is new
+tables and a new tab. It cannot break anything that exists because nothing
+reads it.
+
+Making FIFO *the books* is different. Treatment cost is already frozen per row
+at save time, so switching the source of that frozen number only affects rows
+saved after the switch — low risk. **Processing cost is derived live** off
+`delivery_receipts → protocol_meds → medications`, and every lot that ever ran
+a protocol reads today's prices. Freezing it means writing cost rows that did
+not exist before and rewriting `lot_processing_costs` to read them. Get it
+wrong and closeout moves on lots that are already sold.
+
+So: build the ledger, run it in parallel until the numbers are trusted, then
+flip the two cost streams — treatment first, processing last, both behind a
+cutover date so nothing before the cutover moves at all.
+
+The upside is worth the care. Freezing processing cost **retires the worst
+landmine in this app**: today, editing a drug price or a protocol silently
+rewrites processing cost for every lot that ever used it, closed lots and prior
+fiscal years included, with no audit trail. After phase 3 a price change moves
+nothing that already happened. `protocols.effective_from`, which is decorative
+today, stops mattering because the cost is captured when the cattle are
+processed.
+
+---
+
+## Model
+
+```
+med_purchases ── med_purchase_lines ──┐   the line IS the FIFO layer:
+   (vet invoice)   (location, qty,    │   location + qty_remaining live on it
+                    unit cost,        │
+                    qty_remaining)    │
+                                      │
+med_txns ── med_txn_layers ───────────┘
+ (every movement)  (which layers it took, at what cost — frozen)
+
+med_counts ── med_count_lines        med_stock_locations
+ (physical count → variance → adjustment txn)
+```
+
+Six tables and one lookup. The shape is the shipment allocation shape — a
+header, lines, and an allocation table that records exactly which units at
+exactly which cost — for the same reason: a movement that cannot say what it
+took cannot be reversed.
+
+**What got cut to keep this simple.** The first draft had a separate
+`med_layers` table so one purchase could sit in several places at once, plus a
+transfer RPC that split layers and mirrored them at the destination preserving
+received dates. All of that existed to move stock between locations — and in
+practice stock never moves. Meds bought for the ranch stay at the ranch; meds a
+buyer picks up at the supplier never come here. So **a purchase line is received
+to one location and stays there**, `location_id` and `qty_remaining` sit on the
+line itself, and the fiddliest machinery in the design disappears. If stock ever
+genuinely does move, it is an adjustment out and an adjustment in — which the
+count screen already writes.
+
+### `med_stock_locations`
+
+`name`, `kind` (`ranch` | `buyer`), `is_active`, `notes`.
+
+**One row for the ranch, one per buyer** — *Ranch*, *Buyer — Thigpen*,
+*Buyer — Jake Taylor*. That is the whole list.
+
+The barn and the crew boxes are **one pool**, not two. A bottle in a truck has
+not left the ranch; it is the same inventory in a different hand, and who has it
+is custody, tracked on the person and not on the stock. That also makes the
+monthly count simpler in the pen: count the barn and the trucks and enter one
+number per med.
+
+Buyer locations are what make the buyer story fall out of the same machinery:
+meds picked up at the supplier never touch the ranch, so they are received
+straight into the buyer's row and consumed from there.
+
+`lots.source` already carries the buyer as free text (`Thigpen`, `Jake Taylor`).
+A nullable `source_key` on the location maps to it, so a lot's processing draw
+knows whose account to pull from without a schema change to `lots`.
+
+### `med_purchases` / `med_purchase_lines`
+
+Header is the supplier invoice: date, vendor, invoice number, total, notes,
+`fiscal_year` (derived by trigger, same July–June rule as everything else).
+Attachments follow the `invoice_attachments` pattern — `uploadAttachment()` and
+the storage bucket already exist.
+
+**Each line IS a FIFO layer.** `location_id` and `qty_remaining` live on the
+line; everything else about it is immutable once posted:
+
+- `medication_id`, `location_id`, `qty_bottles`, `bottle_size`, `unit`
+- `qty_units` = bottles × size — **the base unit is the unit of account**, not
+  the bottle. A 500 mL bottle against a 6 cc dose is not a whole number of
+  anything; tracking bottles alone cannot answer "what is on hand".
+- `unit_cost` = landed cost ÷ `qty_units`. Freight and handling on the invoice
+  allocate across lines by value, so unit cost is landed cost.
+- `qty_remaining` — what is left of this layer
+- `received_date`; `mfr_lot_number` and `expires_on` **optional**, typed only
+  when somebody cares. FIFO needs neither.
+
+`bottle_size` is **snapshotted on the line**, not read from `medications`.
+Bottle sizes change; a layer bought at 500 mL must stay 500 mL after the
+catalog says 1000.
+
+FIFO order is `received_date`, then purchase line sequence, within a location.
+
+### `med_txns` / `med_txn_layers`
+
+Every movement, one row: `txn_date`, `txn_type`, `medication_id`,
+`location_id`, `qty_units`, `crew_user_id`, `reason`, `ref_kind`/`ref_id`,
+notes, `created_by`, `fiscal_year`.
+
+**Five types, not ten:** `opening`, `purchase`, `checkout`, `usage`,
+`adjustment`. Treatment and processing are both `usage`, told apart by
+`ref_kind`. Waste, expiry, a count variance and a plain correction are all
+`adjustment`, told apart by `reason` — one code path, four labels, instead of
+four near-identical types that each need their own handling. A return is a
+negative `checkout`.
+
+Anything that **consumes** writes `med_txn_layers` rows — `layer_id`,
+`qty_units`, `unit_cost`, `extended_cost`. That is where the FIFO cost freezes,
+and it is what makes a reversal exact: put back precisely what was taken, to
+the layers it was taken from. The `delete_death_event` lesson applies —
+a reversal that guesses is a reversal that double-counts.
+
+### `med_counts` / `med_count_lines`
+
+Header: `count_date`, `location_id`, `status` (`draft` | `posted`),
+`counted_by`. Lines: `medication_id`, `counted_units`, and at post time the
+system quantity, the variance in units, and the variance in dollars.
+
+A count is entered as a draft, the variance is **shown before it posts**, and
+posting writes one `adjustment` txn per non-zero line. Short lines consume FIFO;
+long lines add back to the newest layer at its cost.
+
+**This is where the shrink number comes from.** Nothing else produces one.
+
+---
+
+## Where consumption is recorded
+
+### Crew doctoring — one location, custody by person
+
+The crew pulls bottles and uses them across lots for days. Nobody is going to
+log a bottle as it empties, and inventory is an office screen anyway. Bottles
+also move between hands freely, so **the stock location is shared and the
+custody is per person** — a location per cowboy would only manufacture variance
+every time somebody handed a bottle across a chute.
+
+- **Checkout** is a `checkout` txn carrying `crew_user_id`. **It does not move
+  stock** — the bottle is still ranch inventory, just in somebody's hand. Four
+  fields to enter: person, med, bottles, date.
+- **Usage** is consumed per doctoring med line at approval — `dose_cc` units out
+  of the ranch pool, FIFO, cost frozen onto `doctoring_event_meds.cost`.
+  `doctoring_events.recorded_by_user_id` already says who gave it.
+- **The count trues the pool up.** What the ranch should hold is purchases minus
+  recorded doses; what it actually holds is the count, barn and trucks together.
+  The difference is shrink.
+
+`med_custody` (view) is the per-person sub-ledger: checked out − returned −
+doses recorded by that person = outstanding. **That number is fair over a
+month and unfair over a day** — a bottle checked out by one man and finished by
+another shows up as one running high and the other low until it washes out. The
+dollars still reconcile at the location level either way, because the count
+does not care whose hand the bottle was in. Say that on the screen; a per-person
+number nobody trusts is worse than none.
+
+**Never block a doctoring entry on inventory.** If the stock is not there the
+entry saves anyway, costs at the most recent layer's unit cost, and the
+location goes negative with a flag on the on-hand screen. This is animal
+health data and a bookkeeping gap is not a reason to lose it. The same rule the
+offline queue follows: never a silent drop, never a hard stop on a field record.
+
+### Processing — the buyer's draw
+
+Meds for processing are picked up by the buyer at the supplier and used on our
+cattle before they ship. So the pickup is a purchase received to that buyer's
+location, and the processing of a receipt consumes from it. Nothing transfers.
+
+Expected units for a receipt are exactly what `lot_processing_costs` already
+computes — protocol dose per head at the receipt's weight, rounded by
+`round_up_to`, times head — so the arithmetic is not new, only its timing and
+its price source.
+
+Two numbers, and they will not agree:
+
+| | |
+|---|---|
+| **Expected** | head processed × protocol dose. What the cattle should have got. |
+| **Drawn** | what the buyer actually picked up. |
+
+**The lot is charged expected, at FIFO cost. The difference is the buyer's
+efficiency variance, and it lands on the buyer, not on whichever lot happened
+to be processed last.** A buyer who draws a case and uses two thirds of it has
+not made one load of cattle more expensive; he has left our stock sitting on his
+place. Charging drawn would put his waste onto an arbitrary lot and make
+lot-to-lot comparison meaningless.
+
+Unused balance stays on the buyer's location as JFR-owned inventory and shows in
+ending inventory, because it is ours.
+
+---
+
+## A medicine used before the app knows what it cost
+
+Rare, but it happens: something gets picked up at the supplier and given before
+anybody enters the invoice. Two things go wrong, and the second is the dangerous
+one.
+
+**1. The dose books at zero.** With no layer and no catalog price there is
+nothing to price it from. The treatment still saves — that rule does not bend —
+but it books at $0.00, and a zero looks like an answer in a way a blank does
+not. So the transaction is marked `cost_provisional`, and the on-hand screen
+says *"used but booked at $0 — no cost known"* rather than showing a tidy zero.
+
+**2. The shelf reads high, and the next count calls it shrink.** This is the
+one worth catching. Say 3 doses are given on the 12th and the invoice is entered
+on the 20th, dated the 8th. `med_consume` already ran on the 12th, found no
+layer, and recorded a shortfall. The layer now lands **full**. On-hand claims 10
+when 7 are really there, the count comes up 3 short, and those 3 post as shrink.
+
+They were not shrink. They were a treatment the ledger had not heard about yet.
+Left alone, **every late invoice quietly inflates the one number this module
+exists to produce.**
+
+### `med_settle_uncovered(medication_id, location_id)`
+
+Walks uncovered usage oldest first and lets it draw on any layer that was
+genuinely on the shelf when the treatment happened — **received on or before the
+usage date**. A bottle bought afterwards is left alone; it cannot have been in
+the syringe. Whatever is still uncovered gets re-priced to the best cost now
+known, so a zero booked in ignorance does not stay a zero.
+
+It moves no stock that is really on the shelf: the shortfall rows point at no
+layer, so converting them into real draws only spends what was already spent.
+Afterwards the usage is backed by a real layer, which means a reversal restores
+it properly too.
+
+- Runs automatically right after a purchase posts, and says in the toast how
+  many units it matched. That is the moment it matters.
+- Also a **Settle uncovered usage** button on On hand, for anything entered out
+  of order afterwards.
+- If it settles nothing, the message says why: there is no purchase dated on or
+  before the day the medication was given.
+
+A **freetext** medication — one typed by name rather than picked from the
+catalog — carries no `medication_id` and so never reaches inventory at all. That
+is not a hole in the ledger so much as a hole in the record; it is worth
+knowing, and it is why picking from the list matters.
+
+---
+
+## Efficiency — what the number actually means
+
+Efficiency = **theoretical units ÷ units consumed**, per medication, per period,
+per crew member or buyer.
+
+Theoretical is the sum of recorded doses. Note what that already includes:
+`round_up_to` models **the syringe setting including waste**, not drug consumed.
+A 6.3 cc dose recorded at 7 cc has already counted 0.7 cc of intended waste. So
+this ratio does not measure ordinary dosing waste — it measures the rest:
+broken and dropped bottles, expired product, transfer loss, over-drawn
+syringes, and **treatments given but never recorded**.
+
+That last one is the reason to build it. A crew running at 80% is either
+wasting a fifth of the drug or doctoring cattle that never made it into the
+books, and both are worth knowing.
+
+Reported alongside it, because a ratio with no scale is easy to dismiss:
+
+- units and dollars of variance
+- doses per bottle achieved vs. label doses per bottle
+- treatment cost per head and per head-day, against the lot's own history
+
+Buyer efficiency is the same ratio with expected-from-protocol as the numerator.
+
+---
+
+## Getting the invoice in — Cowork or by hand
+
+**The review grid is the screen. Cowork fills it, or you type into it.** Both
+land in the same rows, tie against the same total, and post the same way — the
+paste box is just a faster way to fill a grid that always accepts typing. Which
+also means the module is never blocked on Cowork being handy: a two-line invoice
+is quicker typed, and one arriving as a clean emailed PDF may not be worth
+handing off at all.
+
+Why not have the app do it: this is one static HTML file on GitHub Pages, no
+build step, no server, four CDN libraries. Inside that, **pdf.js cannot read a
+scan at all** — a scan is an image and there is no text in it to find — and
+browser OCR (Tesseract, 2–4 MB of wasm) errs precisely on digits, which is the
+entire content of an invoice. Reading a scanned invoice properly takes a model,
+and the model is already in the room.
+
+So for a scanned or photographed invoice: hand it to Cowork, it reads the scan
+and matches the products and returns one tab-separated block; paste that into
+the Purchases screen, check the grid, post. For anything short, click **+ Line**
+and type it. The PDF attaches to the purchase either way through
+`uploadAttachment()`, which already exists.
+
+**The paste format is the contract**, so it is printed on the screen beside the
+box — the Cowork prompt stays stable, and the app never guesses at a layout.
+One header line, then one line per product:
+
+```
+Vendor           2026-09-04    INV-88213
+Draxxin          2    496.31
+Ultrachoice 8    4    189.87
+Valcor           6    150.71
+```
+
+Name, bottles, unit price — the same three fields a typed line asks for. Bottle
+size and the base-unit conversion come from `medications`; `mfr_lot_number` and
+`expires_on` stay optional and are usually left blank.
+
+**A pasted name that does not match a medication stops and asks** — with the
+same picker a typed line uses, so an unmatched paste degrades into hand entry
+rather than into an error. It never picks the closest row on its own — a med matched to the wrong catalog entry prices the
+wrong layer, and that error is invisible from the moment it posts.
+
+**Nothing posts straight from a parse.** Every pasted line lands in a review
+grid showing quantity, unit cost and extended cost with a running total against
+the invoice, and it cannot post until that total ties. A wrong unit cost does
+not throw — it silently prices every future FIFO draw off that layer, and by the
+time it surfaces it is frozen into treatment cost on a dozen lots. **This is the
+one place the build stays deliberately un-simple.**
+
+If the typing ever becomes the bottleneck, the next step is a Supabase Edge
+Function that takes the PDF and returns the same block — same format, same grid,
+no paste. That is real infrastructure (a function, a stored secret, a deploy path
+this repo does not have yet), so it waits until volume asks for it.
+
+### Emailed invoices: Approvals > Meds (Bar J, 2026-10-02)
+
+John, 2026-10-02: "For medicines the only vendor is Bar J for now. Put into the
+approvals first. Must-answer box on location in approvals. Ask on new meds but
+be prepared to build item. 4am triage for now."
+
+Bar J Vet Supply sends a Lightspeed receipt by email (to Lauren, who forwards
+it). The 4am triage run finds it and calls `stage_med_invoice(message_id, body)`
+with the plain-text body verbatim. The database parses it
+(`med_parse_barj_invoice`) into `med_invoice_intake`: invoice number, date,
+total, and one line per product with qty, $ a bottle, line total and the bottle
+size when the item name states one ("250 ml", "100ml"). Anything that does not
+add up is written to `problems` and shown in red; the parser never fixes it.
+Staging is idempotent on (vendor, invoice number), so the direct and the
+forwarded copy stage once. Migration: `docs/sql/2026-10-02n_med_invoice_intake.sql`.
+
+**Approvals > Meds** (owner, office, accountant can see it; owner and office
+can act) lists every staged invoice that has no purchase yet, one card each,
+with the recently posted or rejected ones collapsed below. The Approvals badge
+counts them with the field and feed queues.
+
+- **Review & post** opens the same Purchases grid as a hand-entered or pasted
+  invoice. There is no second grid. Date, vendor, invoice number, total and the
+  lines are filled from the intake: bottles = qty, $ a bottle = line total ÷
+  qty, bottle size = the remembered pick's size, else the size on the invoice,
+  else blank.
+- **Received to starts blank** ("— choose where it went —") and Post refuses
+  until it is chosen. A plain New purchase still defaults to Ranch.
+- **Matching:** a remembered pick for that vendor and item name first, then the
+  exact catalog name. Never a near match. An unmatched line stays red with the
+  picker and a **New medication** button, which opens the medication form
+  pre-filled from the line (name, bottle size, mL, bottle cost = $ a bottle).
+  Category and withdrawal are left for John. On save the new med joins the
+  pickers and lands on that line.
+- The tie-out still gates Post, and `med_settle_uncovered` still runs after.
+- **Post** writes `med_purchases.intake_id`. A partial unique index on it means
+  one invoice posts once; a second try shows "this invoice is already posted".
+  Deleting the purchase puts the invoice back in the queue.
+- After the post, every line John matched **by hand** is remembered through
+  `med_alias_learn(vendor, item name, medication, bottle size)` in
+  `med_name_aliases`, so the next invoice with that item name matches by
+  itself. A line that matched by exact name is not remembered. A remembered
+  pick that John changes is overwritten. A failure here is shown and does not
+  undo the post.
+- **Reject** asks for a reason and calls `reject_med_invoice`, which refuses
+  if the invoice is posted.
+- **Back / Cancel** from a staged invoice return to Approvals > Meds with
+  nothing written.
+
+The bottle size on the purchase line is the invoice's, not the catalog's: Bar
+J #6654 is a 250 mL Macrosyn and the catalog "Macrosyn(Draxxin)" is set up at
+500 mL. The line carries 250 and the catalog is left alone.
+
+Only Bar J is parsed. Another vendor needs its own parser; do not widen this
+one by guessing at a layout.
+
+**Testing.** `scripts/med-intake-harness/run.js` drives the real `index.html` in
+headless Chromium against an in-memory stand-in for Supabase loaded with the
+#6654 intake: queue, blank location refused, both lines unmatched, New
+medication pre-filled, the $237.69 tie, Cancel, then a full post into the
+stand-in only (intake id, location, 250 mL line, both picks remembered, the
+second post refused). It never touches the live database.
+
+---
+
+## The Redwing report
+
+Same shape as the Sales → Accounting Report, for the same reason: it is the
+format Redwing takes. Twelve columns in Redwing's order, Account / Profit Center
+/ Production Year editable and remembered in `localStorage` (try/catch — storage
+throws outright in a private window), landscape print, PDF through
+`sharePdfFile()`, and **Copy rows** to tab-separated text, which is what
+actually saves the typing.
+
+Rows for a period:
+
+| row set | Production Center | Amount |
+|---|---|---|
+| Usage, one row per (lot, med category) | the lot | FIFO cost consumed |
+| Shrink and expiry write-offs | blank | adjustment value |
+| Ending inventory | blank | on-hand valuation at period end |
+
+**The report is date-ranged, so weekly vs monthly is a picker rather than a
+decision that has to be made now.** But the two are not equally meaningful:
+usage can be stated for any range because doctoring events are dated; **shrink
+cannot, because it only exists once a count is posted.** For a range that does
+not end on a count date the report states usage and says plainly that shrink is
+un-counted for the period, rather than printing a zero that reads as "none".
+
+### Redwing already carries inventory (John, 2026-08-27)
+
+That changes the posture, and it is worth being explicit about it because two
+sets of books over the same bottles is how both end up wrong.
+
+**The full inventory runs here; Redwing is the cross-check.** Redwing stays the
+general ledger and keeps its own inventory value for the financial statements,
+but the working inventory — what is on the shelf, what came in, what got used on
+which lot — lives in the office app, and the two get compared on a schedule
+rather than one being slaved to the other.
+
+That is the right split because Redwing knows dollars in and dollars out, and
+what it cannot know is that 1.1 cc/100 lb of Draxxin went into lot 36-27 on a
+Tuesday, that the crew is running at 82% of theoretical, or that Thigpen drew a
+case and processed 441 head with it.
+
+### Comparing the two — quantities first, then value
+
+**A quantity difference and a value difference are different diagnoses and the
+report must not blur them.**
+
+- **Quantities disagree** → something is genuinely missing on one side. An
+  invoice entered in one system and not the other, a usage never recorded, a
+  count posted here and not there. Real, and someone has to go find it.
+- **Quantities agree but values do not** → that is the costing method, and it is
+  expected, not an error. If Redwing costs at average or standard and we cost at
+  FIFO, the same bottles carry two different values *by construction*.
+
+So the comparison shows both columns side by side and labels the second one for
+what it is. A value gap presented as an exception sends somebody out to count
+bottles that are all there.
+
+**Phase 1 prints our valuation in Redwing's item order** — that is enough to
+compare by eye or in a spreadsheet, and it is nearly free. A paste box that takes
+Redwing's own export and renders the side-by-side is a small follow-on, and it
+waits until the actual Redwing report is in hand tomorrow so it is built against
+the real columns rather than a guess.
+
+So, provisionally, until the reports land:
+
+- **`med_roll_forward` carries the costing difference as its own line**, so it
+  is never mistaken for shrink.
+- **The report almost certainly does not post purchases.** If the vet-supply
+  invoice already enters Redwing through AP, a purchase row set here books the
+  same invoice twice. Usage allocation and inventory adjustment are what Redwing
+  cannot derive on its own.
+- **We still have to value inventory ourselves.** Not to compete with Redwing's
+  balance sheet, but because FIFO layer cost is what phases 2 and 3 freeze into
+  treatment and processing cost per lot. Redwing cannot supply that number at
+  lot grain.
+- **Which means the two valuations will differ, and that has to be expected
+  rather than discovered.** If Redwing costs at average or standard and we cost
+  at FIFO, the ending values differ *by construction*, not by error. My vote:
+  **Redwing owns the balance-sheet number, this module owns the per-lot
+  allocation, and `med_roll_forward` is the reconciliation between them** —
+  built to show the costing-method difference as its own line rather than
+  burying it in shrink. Shrink that is really a costing difference is a number
+  that will send somebody out to count bottles that are all there.
+
+**Add `redwing_item_code` to `medications`.** The sales accounting report prints
+lot numbers as the app holds them because we refused to guess Redwing's mapping.
+Here there is no guessing to do: Redwing has an item master, so the mapping gets
+stored once and the report emits Redwing's own item codes.
+
+### What settles the rest (arriving 2026-08-28)
+
+John is sending the Redwing reports and the shape he wants for usage and
+adjustments. Four things answer everything still open:
+
+1. **The inventory valuation report** — reveals Redwing's costing method (FIFO,
+   average or standard) and its item numbering. This is the one that decides how
+   the reconciliation line is built.
+2. **The item master / item list** — the mapping for `redwing_item_code`.
+3. **A recent vet-supply invoice as Redwing received it** — confirms purchases
+   already land through AP, and settles the purchases-row question outright.
+4. **Whatever usage / adjustment entry gets made today** — the format this
+   report has to match.
+
+---
+
+## The count sheet and the monthly reconcile
+
+The count is the only thing in this design that produces a shrink number, so
+it gets a real workflow rather than a form. Two halves: a sheet you carry into
+the medicine room, and a screen you key it back into.
+
+### The sheet
+
+Printed from **On hand**, one line per medication, ordered by category and name
+so you walk the shelf once. Two write-in columns, because that is how counting
+actually goes:
+
+```
+Medication            Unit    Full bottles ____   Open bottle ____
+Draxxin               500 mL  ________________    ____________ mL
+Ultrachoice 8         250 ds  ________________    ____________ ds
+```
+
+**Full bottles and the open one are counted separately.** A 500 mL bottle
+half used is 250 units of real inventory, and a sheet with one box forces the
+counter to do arithmetic on a clipboard — which is where the error gets made.
+The app does the multiplication.
+
+**My vote: the printed sheet does NOT show the expected quantity by default.**
+A number printed on the sheet is a number that gets copied down, and a count
+that agrees with the system because the system was printed on it finds no
+shrink at all — which is the entire point of counting. So: a **"show expected"
+checkbox, defaulting OFF**, for when the sheet is being used to chase a known
+discrepancy rather than to take a clean count. Expected **value** is on the
+screen and on the variance report either way; it is the expected *quantity* that
+biases the count.
+
+Overrule this if you want the expected column printed — it is a checkbox either
+way, and it is your count.
+
+### Entering it
+
+The entry screen mirrors the sheet exactly: same order, same two columns. Type
+what was written, leave untouched meds blank (blank means "not counted", which
+is not the same as zero — a blank must never post an adjustment writing the
+stock to nothing).
+
+Then, before anything posts:
+
+| | |
+|---|---|
+| **Expected** | units the ledger says should be there |
+| **Counted** | full bottles × bottle size + the open bottle |
+| **Variance** | units, and dollars at FIFO cost |
+
+**The variance is shown and has to be looked at before posting.** Posting writes
+one `adjustment` txn per non-zero line, `reason = 'count'`, and those adjustments
+are the month's shrink.
+
+### What it covers
+
+The count covers the **Ranch** location. A buyer's shelf is on his place and
+cannot be counted from here — buyer balances reconcile through
+`med_efficiency` against head processed instead, which is what that report is
+for.
+
+Cadence is monthly, and mandatory at 6/30 for the fiscal year close.
+
+---
+
+## Reports
+
+All views `WITH (security_invoker = true)`, no exceptions.
+
+Six views. Valuation is a total row on `med_on_hand` and exceptions are flags on
+it, rather than views of their own.
+
+| view | answers |
+|---|---|
+| `med_on_hand` | units, bottle equivalent, FIFO value, oldest layer, and flags: negative, unpriced, expired, stale |
+| `med_activity` | the ledger, filterable by med, location, date, type |
+| `med_roll_forward` | beginning + purchases + opening − used + adjustments + uncovered = ending, by month and by fiscal year. Ties by construction, and verified to tie to `med_on_hand`. |
+| `med_efficiency` | theoretical vs consumed, units and dollars — grouped by crew member, or by buyer against head processed |
+| `med_custody` | per crew member: checked out, doses recorded, outstanding |
+| `med_buyer_reconciliation` | per buyer: drawn, expected from head processed, variance |
+
+Dates use `public.ranch_today()`, never `CURRENT_DATE`. The database runs UTC
+and the ranch does not; `lot_daily_head` already lost a day to this once.
+
+---
+
+## The office tab
+
+New top-level **Inventory** tab, `data-perm="office"` — it is all dollars, so
+crew never sees it. Sub-tabs:
+
+1. **On hand** — one list, ranch and each buyer, with value and the flags
+2. **Purchases** — attach the invoice PDF, paste from Cowork or type the lines,
+   tie, post
+3. **Checkouts** — person, med, bottles, date. Four fields.
+4. **Counts** — print the count sheet, walk the room, key the two columns back
+   in, look at the variance, post. Blank means not counted, never zero.
+5. **Efficiency** — crew by person, buyers by name
+6. **Reports** — the Redwing report, the roll-forward, and our valuation in
+   Redwing item order for the monthly comparison; print landscape and PDF
+   through the existing `sharePdfFile()` path
+
+---
+
+## Trying it out without touching anything
+
+The whole module can be run for real, in the live app, against the live
+database, without a single row of the books moving. Three facts make that true
+rather than hopeful.
+
+**1. It writes to nothing that exists.** Every write in the Inventory tab goes
+to a `med_*` table. `medications`, `doctoring_events`, `lots`, `invoices`,
+`delivery_receipts` and `protocol_meds` are read-only to it. This is checkable,
+not a promise: grep the module for `.insert(`, `.update(`, `.delete(`.
+
+**2. Doctoring does not draw stock until you say so.**
+`med_stock_locations.usage_from` is the go-live switch. Until it is set, the
+doctoring save path records nothing against inventory, so treatments carry on
+exactly as they do today while the tables sit there empty. Set it on **Inventory
+→ Setup**, and it takes effect for entries dated on or after that day.
+
+**3. A rehearsal happens in a test location and erases without a trace.** Make a
+location with `is_test`, post practice purchases to it, count it, print sheets,
+run every report — all through **the same code paths as the real thing**, which
+is the only kind of rehearsal worth doing. Then erase it in one click.
+`med_purge_location()` **refuses outright on a location not marked as a test**;
+without that check it is a delete statement pointed at the inventory and one
+wrong id takes the real books with it.
+
+### The order
+
+1. **Apply the migration.** Safe before any decision is made: it creates the
+   `med_*` tables, seeds one *Ranch* location with `usage_from` unset, and adds
+   one nullable column (`medications.redwing_item_code`) to a live table. That
+   column is the only change to anything that already existed.
+2. **Deploy `index.html`.** The tab appears for office and owner. It reads live
+   `medications` so the pickers are real, and writes only to its own tables.
+3. **Rehearse.** Setup → + Location → answer *yes* to "is this a test
+   location". Post a purchase against it, take a count on it, break the tie-out
+   on purpose and watch it refuse, print the blind sheet, run the roll-forward.
+4. **Erase it.** Setup → Erase & delete. Verified to leave zero rows and zero
+   orphaned allocations.
+5. **Go live.** Add the real buyer locations, take the opening count on *Ranch*,
+   then Setup → Go live and set the date to the count date.
+
+Nothing in steps 1–4 can move a lot, a receipt, a treatment or a dollar of
+existing cost, and step 5 is a single date on a single row — reversible with
+*Turn back off*, which stops new usage without removing anything already
+recorded.
+
+---
+
+## Phases
+
+### Phase 1 — the ledger (no effect on the books)
+
+Target: **opening count 2026-09-01**, soft. If the build runs past it, the count
+is still dated 9/1 and everything since is entered in date order behind it —
+what cannot happen is a txn dated before the opening layers exist.
+
+Note the first fiscal year of inventory is a partial one: FY 2027 runs
+2026-07-01 to 2027-06-30, so its roll-forward opens on the 9/1 count rather than
+on zero. The report should say so on its face, or the year looks short.
+
+Tables, RLS and policies, RPCs, views, the Inventory tab. Purchases (Cowork paste or
+hand entry), checkouts, the count sheet and the monthly reconcile, shrink,
+on-hand value, the Redwing report, the valuation in Redwing item order, and both
+efficiency reports.
+
+`doctoring_event_meds.cost` and `lot_processing_costs` are **not touched**.
+Inventory records usage in parallel and the two costings can be compared before
+anything is trusted.
+
+RPCs, all INVOKER with a pinned `search_path`:
+
+- `med_consume(medication_id, location_id, qty_units, txn_type, reason, ref_kind, ref_id, txn_date)`
+  → allocates FIFO, writes the txn and its layer rows, returns cost
+- `med_reverse_txn(txn_id)` → restores exactly the layers named in `med_txn_layers`
+- `med_post_count(count_id)` → variance → adjustment txns, all or nothing
+
+Three, not four. There is no transfer RPC because there are no transfers.
+
+Run `supabase/migrations/20260821000300_rls_verify.sql` after the migration.
+
+**Run this alone for a period — a month, or through a full round of doctoring —
+before phase 2.**
+
+### Phase 2 — treatment cost from FIFO
+
+At approval, each doctoring med line consumes from the crew location and the
+FIFO extended cost freezes onto `doctoring_event_meds.cost`. Deleting a
+doctoring event reverses the consumption.
+
+No backfill and no cutover table needed: that column is already frozen per row,
+so rows written before the switch keep the cost they were written with. Only new
+rows change source.
+
+Approvals keeps its unpriced-med flag, which now also means "no layer to draw
+from".
+
+### Phase 3 — processing cost from FIFO (the careful one)
+
+1. Pick a **cutover date**.
+2. **Snapshot** every existing receipt's currently-derived processing cost into
+   `delivery_receipt_med_costs` (receipt, med, units, unit cost, extended cost)
+   — the frozen record of what the books said before the switch.
+3. New receipts on or after the cutover consume from the buyer's or barn's
+   location and write their own frozen rows.
+4. Rewrite `lot_processing_costs` / `lot_processing_cost_detail` to read the
+   frozen rows instead of recomputing. Keep `unpriced_line_count` — it now means
+   "no layer or no cost", which is the same warning wearing a different hat.
+5. Verify **every lot's total is unchanged to the cent** on the day of the
+   switch. That is the acceptance test; if a lot moves, stop.
+
+After this, repointing a receipt to a new protocol version (the documented
+Draxxin → Macrosyn procedure) means reverse and re-consume, not just an
+`UPDATE`. `docs/processing-cost-and-protocol-versioning.md` and the CLAUDE.md
+section both need rewriting when this lands — the rule they teach is
+deliberately reversed by it.
+
+---
+
+## Access
+
+Office and owner read and write. Crew: no access to the tab and no grants on
+the tables — this is entirely dollars, and unlike `medications` there is no
+field-app dependency forcing a compromise. Crew members are *named* in custody
+rows without being able to read them.
+
+Owner-only DELETE on `med_txns`, `med_purchases` and `med_counts`, matching the
+existing rule: the ledger is an audit trail, and an accidental delete there is
+unrecoverable in a way an accidental insert is not. Corrections are reversals,
+not deletions.
+
+---
+
+## Settled since the first draft (2026-08-27)
+
+1. **Insufficient stock at doctoring** — save anyway, cost at the last known
+   unit cost, flag on exceptions. Never block an animal health record.
+2. **Expired product** — track `expires_on`, warn on the on-hand screen, write
+   off with an `expired` txn, kept separate from count shrink; expiry is a
+   buying problem and shrink is a handling problem.
+3. **Freight on the vet invoice** — allocated across lines by value into unit
+   cost, so FIFO carries landed cost.
+4. **Crew locations** — one shared crew location, custody per person.
+5. **Count cadence** — monthly, and mandatory at 6/30 for the fiscal year close.
+6. **Opening count** — soft target 2026-09-01.
+7. **`medications.cost_per_unit`** — kept, relabelled "last purchase price",
+   used as the fallback when there is no layer. It stops being called the price.
+
+## Still open
+
+- **Redwing's costing method**, from the valuation report — decides how the
+  reconciliation line between our FIFO value and Redwing's is built.
+- **Does the vet-supply invoice already reach Redwing through AP?** Near-certain
+  now that Redwing carries inventory, but confirm before deciding the report
+  emits no purchase rows.
+- **Report cadence** — weekly or monthly. Deliberately deferred: the report is
+  date-ranged, so this is a habit rather than a build decision.
+
+---
+
+## Rebuilt on main, 2026-10-01
+
+Everything above still stands as the design. What changed is the ground it was
+built on.
+
+The work described here was done in late August on branch
+`claude/medicine-inventory-fifo-03tqg9`, cut from `60a6a2d`, and was never
+merged. Main moved a long way in the meantime, and three of the things it
+changed are things this module had to be rebuilt against rather than merged
+into:
+
+1. **`CLAUDE.md` was split into `docs/`** (2026-09-27). The rules this module
+   has to satisfy now live in `docs/conventions.md` and `docs/database.md`.
+2. **The `accountant` role landed** (2026-09-01) and with it
+   `can_read_operational()` / `can_read_books()`. The August migration's
+   SELECT policies named `owner` and `office` directly, so an accountant
+   would have been unable to read one row of this module. The rebuilt
+   migration goes through `can_read_books()`, which also means the next
+   read-only role is one line in one function rather than another eight-table
+   migration.
+3. **Feed inventory wave 1 shipped the Inventory tab** with a material chip
+   (`docs/inventory-flow-design.md`), built explicitly so meds would mount
+   under it: *"Adding meds — or fuel, or parts — is a chip and a
+   `data-material` attribute, not another screen."* The August build had its
+   own `navInventory` tab and its own `inventorySubtabs` row. The screens are
+   the same screens; the mounting is the chip.
+
+So the ledger is now `docs/sql/2026-10-01_med_inventory.sql` and the August
+file is superseded. The August screens are re-applied to today's `index.html`
+under the chip, with four changes:
+
+- `showInventoryTab()` stays the shared router; the med half became
+  `showMedInventoryTab()`, which is called when the chip is on Meds.
+- `loadInvPurchases` / `invPurchasesView` already existed on the spine side,
+  so the med pair is `loadInvMedPurchases` / `invMedPurchasesView`.
+- Write controls carry `data-write`, which did not exist in August. It is its
+  own attribute, not `data-perm="write"` — half these buttons already carry a
+  `data-perm`, and an element holds only one.
+- Needs Attention, Orders and Invoices are shared spine screens and meds use
+  them unchanged. For meds, **Purchases and Receipts are one screen**: the vet
+  invoice *is* the receipt and its lines *are* the FIFO layers, so there is no
+  second delivery ticket to reconcile the way a feed load has.
+
+### Two things the rebuild found
+
+**The roll-forward identity did not hold for a shorted adjustment.**
+`med_roll_forward` netted the uncovered part out of `adjustment_units` while
+`uncovered_units` added it back, so a waste entry made against an empty shelf
+had its units removed twice and
+`beginning + purchases + opening − used + adjustments + uncovered = ending`
+stopped holding for exactly those rows. `adjustment_units` and
+`adjustment_value` are now gross and signed, and uncovered is taken out once,
+for every transaction type at once. Covered by T24 and T25 in
+`docs/sql/tests/`.
+
+**Crew entering a treatment in the office app cannot reach the ledger.**
+`med_consume` is INVOKER and every policy here goes through
+`can_read_books()`, which excludes crew by design — a FIFO draw reads layer
+costs. So a treatment typed by a crew member in the office app saves
+correctly and never reaches inventory, and the next count reads those doses
+as shrink. The field app is unaffected: a field entry becomes a treatment
+when the office approves it, and the office draws the stock.
+
+This is latent today — every doctoring event on the books was entered by the
+owner, and crew logins are not set up — so it is **surfaced rather than
+worked around**: the treatment is kept, the person is told plainly that the
+dose was not drawn, and the office records it. Closing it properly means
+making `med_consume` SECURITY DEFINER and withholding the cost it returns
+from anyone who cannot read books. That is a change to the role model, so it
+is John's call and it is in `docs/OPEN-ITEMS.md`.
+
+---
+
+## The opening count, 2026-10-01
+
+Source: the Redwing **Medicine RM Inventory 1/1/1900 to 9/30/2026**, account
+117500 Animal Health RM. A ScanSnap scan with no text layer, so the figures
+were read off the image; both of the report's own control totals — 731.00
+units and $21,896.25 — were reproduced from that reading before anything was
+entered.
+
+Two properties of that report shape everything downstream:
+
+- **The `$ / unit` column is blank on every line.** Unit cost is derived as
+  amount ÷ quantity.
+- **The quantity column is not one unit of measure.** Enroflox 21 at $183.57
+  is bottles; Synovex C 110 at $1.10 is doses. This ledger multiplies by
+  bottle size, so reading one for the other puts the opening balance out by a
+  factor of a hundred. Every count line records which it took.
+
+### Two cost gaps, and they are not the same problem
+
+**Enroflox is a genuine disagreement about price.** Redwing's derived
+$0.367130/mL against this catalog's $0.264360 — plus 38.9%, $1,079.09 across
+the 21 bottles on hand, $3.18 a head on a 31 mL dose. Both figures are
+internally consistent; they are simply not the same number. John's answer on
+2026-10-01: **a rebate we might get later.** So Redwing's figure is what the
+cash went out at and is the right FIFO cost today. What to do when a rebate
+actually lands is `docs/OPEN-ITEMS.md` item 0b.
+
+**Excede is Redwing disagreeing with itself,** and working out *why* took
+three passes. It carried the drug on two lines: 100 mL × 24 at $2.138917/mL,
+and 250 mL × 1 at $10.386840/mL — 4.86× the first. $2,596.71 ÷ 5 = $519.34 a
+bottle, within 0.3% of this catalog's $517.78, so the line read like **five
+bottles of money booked against a quantity of one**.
+
+The arithmetic was right and the first explanation for it was wrong. It was
+not a case price keyed against a single unit at receiving; it was **product
+charged out and mis-posted**, left sitting in inventory at the wrong value.
+John had it corrected in Redwing the same day, and corrected the line reads
+**1 bottle at $519.35** — which is what "$519.34 a bottle" had been pointing
+at all along.
+
+So Redwing's Excede is $5,133.40 (24 × 100 mL) + $519.35 (1 × 250 mL) =
+**$5,652.75**, and **$2,077.36** came out of inventory. The shelf holds both
+containers — 1 × 250 mL and 24 × 100 mL, 2,650 mL, confirmed by John — valued
+at $2.133113/mL, which back-multiplies to $5,652.75 exactly.
+
+This is the finding John called the reason for the whole module.
+
+The worked memo and the medicine-room worksheet are in `docs/worksheets/`.
+
+### Where it landed, end of 2026-10-01
+
+The bridge closes in **both** directions, which is the test that the
+reconciliation is complete rather than merely plausible:
+
+| | |
+|---|---|
+| Redwing at 9/30/2026 | $21,896.25 |
+| less Excede, re-allocated in Redwing on 10/1 — *already done* | $2,077.36 |
+| less Macrosyn 250 mL, from the July close — *Jayci and Brenda* | $373.15 |
+| **plus medicine in the crew trucks, back into inventory** | **$2,419.56** |
+| less expired product written off, net | $1,783.66 |
+| &nbsp;&nbsp;&nbsp;One Grass $1,804.00 + Synovex S $165.00 + Synovex C $121.00 | $2,090.00 |
+| &nbsp;&nbsp;&nbsp;less the $306.34 moved to Multi Min rather than written off | $306.34 |
+| **Redwing after all of it** | **$20,081.64** |
+| **The count — barn and trucks — valued** | **$20,081.64** |
+
+Ten lines carry stock, and none of the 21 is left uncounted. Every stocked
+line reconciles its four gathering boxes — barn full, barn open, crew full, crew open — against `counted_units`,
+and that assertion is in the migration's verify block because it caught a real
+error: the Excede crew boxes once implied 312.5 mL against a counted 2,775.
+
+**The account goes up, not down.** $2,419.56 of crew stock coming in against
+$1,783.66 of expired product going out is a net of **+$635.90**. The trucks
+are holding more than the shelf is throwing away.
+
+### Counting what the crew carries, rather than waiting
+
+John's question on 2026-10-01: *"The cowboys have inventory in their trucks and
+saddle bags as of today. Do we ignore for now and start inventorying at 10/31?
+This med was charged out last month to cattle but not used yet. Will fix itself
+over the month but throws first month off?"*
+
+It does fix itself over a month, and it does throw the first month off, and
+those are not the same size of problem. Ignoring it means the opening count
+understates stock by whatever is in the trucks, and October then shows a
+windfall when that product gets used against nothing. John chose to count it.
+
+Four men reported, in two messages, in bottles and fractions rather than
+millilitres — which is the right precision to ask a man in a truck for, and is
+why `med_count_lines` stores `crew_open` as a **fraction of a bottle** and does
+the multiplication itself. $2,419.56 in four drugs:
+
+| | in the trucks | |
+|---|---|---|
+| Excede | 475 mL | $1,013.23 |
+| Resflor | 875 mL | $726.92 |
+| Enroflox | 1,250 mL | $458.91 |
+| Draxxin KP | 125 mL | $220.50 |
+
+All four were charged out in September and are still unused, so **Redwing is
+understated by them** and they go back in at the October close.
+
+**The fourth one was booked to the wrong drug first.** It was reported as
+Macrosyn and valued at $195.47; John corrected it to Draxxin KP, 125 mL at
+$220.50. The second-order effect is the one that matters: with no Macrosyn
+anywhere on the place, **all** $373.15 Redwing carries against no quantity
+from the July close is the posting error, not $177.68 of it. Jayci and Brenda
+are the accountants, so that entry is theirs.
+
+**Three of the crew's phrasings carried more than one meaning, and all three
+were put back to John rather than guessed at.** Two were confirmed as read.
+The third — Excede's truck bottles, taken as 100 mL because that is what the
+shelf is mostly made of — was wrong: the actual is four containers, 475 mL
+rather than 187.5 mL, **$613.27** more. It was the reading flagged as the
+weakest of the three, and the one that moved. The rule for the next count is
+to ask for the container size with the fraction, every time.
+
+**Three places Redwing was understated**, which nobody was looking for — every
+difference the exercise was designed to catch was expected to run the other
+way:
+
+- **Protivity**: eight 10-dose boxes on the shelf, Redwing zero. Its count
+  line was corrected twice and the pair is worth keeping. It first said a
+  counted zero copied from Redwing — a false statement about 80 real doses —
+  so it went back to NOT COUNTED while a price was looked for. Then John: the
+  product was charged to a lot in a past period and goes to processing at no
+  cost to burn up. So it is **zero by decision** now, and that is the true
+  statement: the doses exist, their cost does not. Same number, opposite
+  meaning, and only the second one is honest.
+- **Multi Min**: four bottles against Redwing's three, $306.34.
+- **Ivomec Long Range**: two bottles Redwing never carried at all. Going back
+  to the vendor, so neither side holds them — but they arrived and were never
+  booked.
+
+With the Excede mis-posting, that is four things in one day where product moved
+and the books did not follow. All four point at receiving rather than at
+inventory.
+
+### What the opening count still waits on
+
+It is deliberately still a **draft**: posting creates the opening FIFO layers
+and locks the period. What it waits on is Jake Taylor's count, and seven
+medications whose `bottle_size` is still NULL
+because the Redwing report gives a container count and a dollar amount and
+never says how big the container is. A guess there would misprice every future
+dose of that drug silently, so they stay flagged **needs a container size**
+until somebody reads a label. All seven count zero today, so none of them
+blocks the post. `docs/OPEN-ITEMS.md` item 0c has the detail.
+
+Jake Taylor's processing medicine is counted the same day and is in no figure
+above. His **buyer location now exists** — `kind = 'buyer'`, `source_key =
+'Jake Taylor'` matching the five lots that carry it, `usage_from` NULL so
+nothing accrues until his count posts.
+
+John also asked for **three stock locations** — Medicine Room, Cowboys, Jake
+Taylor — against a module built deliberately on one ranch pool with custody
+tracked per person. Jake Taylor fits the design; the room/truck split does
+not, and inserting a second `kind='ranch'` row without fixing
+`invLedgerReady()` first would draw doses off an arbitrary shelf, silently.
+**Decided 2026-10-01: Jake Taylor now, the real split in wave 2.** Item 0d has
+the finding, the two defects and what is left to do.
+
+### Two ways to fill a count line
+
+Added 2026-10-02, on Jake Taylor's count. The grid was built for a man holding
+a part bottle: four boxes, open bottles as a **fraction** in quarters, capped
+at three quarters, because that is the precision an eyeball estimate honestly
+has. Jake's sheet came in thirds, eighths and exact doses — 1 ⅔ of a 500,
+1 ⅛ of a 50, **90 doses** off an implant strip. Six of his nine lines could
+not be typed at all.
+
+Rounding them to quarters was the alternative and it is worse than it looks:
+
+| | as written | to quarters |
+|---|---|---|
+| the count | $2,668.56 | $2,712.55 |
+
+**1.6% high, and four of the five rounded lines round up** — not random, since
+a man writing ⅔ is reporting less than the ¾ above it. It also puts our books
+deliberately at odds with the sheet he signed.
+
+So a line is now filled **one of two ways**:
+
+- **the four boxes**, for an estimate, unchanged;
+- **Counted units**, for an exact figure, typed straight in.
+
+Typing in one blanks the other, so the two can never sit there disagreeing
+while somebody guesses which posted. The grid shows which way each line was
+filled, because a reader next month should know whether 833.3 was measured or
+guessed at.
+
+**No schema change was needed** — the shape already said it. A line with boxes
+has boxes; a line with a `counted_units` and no boxes was typed. The loader
+reads that back.
+
+The quarter assertion in `2026-10-01l` still holds: a typed line has no boxes,
+so its `coalesce(barn_open,0)` is zero, which is a quarter and under the cap.
+
+### The day's corrections, in order
+
+Each is its own file in `docs/sql/`, each with its own verify block, because
+the opening balance of a real set of books should show its working:
+
+| file | what it did |
+|---|---|
+| `2026-10-01_med_opening_count.sql` | the first pass off the scanned report |
+| `2026-10-01c_..._excede_macrosyn.sql` | Excede priced off Redwing's 100 mL line, Macrosyn counted empty |
+| `2026-10-01d_..._container_sizes_and_count.sql` | container sizes off the medicine-room sheet, seven more lines |
+| `2026-10-01e_..._final_lines.sql` | the last two sizes, Protivity corrected off a false zero |
+| `2026-10-01f_..._excede_corrected_synovexc_expired.sql` | Synovex C expired; the Excede half of this file was wrong |
+| `2026-10-01g_med_excede_final.sql` | Excede is 2,650 mL — 1 × 250 mL and 24 × 100 mL |
+| `2026-10-01h_med_crew_held_stock.sql` | what the crew carries, first pass |
+| `2026-10-01i_med_crew_actuals.sql` | the crew's actual counts, $2,394.53 |
+| `2026-10-01j_med_jake_taylor_location.sql` | Jake Taylor's buyer shelf; Resflor confirmed |
+| `2026-10-01k_med_draxxin_kp_truck_and_protivity.sql` | the truck bottle is Draxxin KP; Protivity written off |
+| `2026-10-01l_med_excede_bottle_size_100.sql` | Excede on a 100 mL bottle so the count screen can take it |
+| `2026-10-01m_med_checkout_bottle_size.sql` | a checkout records the size of bottle that left the room |
+| `2026-10-01n_med_go_live.sql` | both counts posted, usage_from set, today's doses drawn |
+| `2026-10-02_med_processing_draw.sql` | processing draws off the shelf; a count will not post ahead of a weight |
+| `2026-10-02b_med_count_delete_guard.sql` | a posted count cannot be deleted; drafts can |
+| `2026-10-02c_med_estimated_weight.sql` | an office estimate doses per-cwt meds until the first invoice |
+| `2026-10-02d_med_fifo_processing_cost.sql` | a lot reads the FIFO draw where there is one, the catalog where there is not |
+
+### A lot's processing cost reads what was really used (2026-10-02)
+
+John: *"Pull processing meds using fifo costing after October 1."*
+
+`lot_processing_cost_detail` priced every processing med off the catalog —
+`dose × medications.cost_per_unit`. That is the right answer while nothing has
+been drawn, and it was all there was before the shelf existed. From go-live a
+receipt also pulls real bottles off real FIFO layers at the price those layers
+were bought at, and the catalog price is a *current* price, not the price of
+the drug that went in the cattle. Two numbers for one event, and the lot was
+carrying the wrong one.
+
+Per receipt, per medication, in order:
+
+1. a FIFO draw exists → cost per head = **drawn cost ÷ head**;
+2. no draw → the catalog, as before;
+3. neither → `cost_per_head`, else NULL, which is a hole and reads as one.
+
+**No date is hard-coded.** A draw can only exist where `usage_from` let it
+happen, so the rule scopes itself: September receipts have no draw and keep
+their implied cost, October receipts have one and read it. The day go-live
+moves for a new location this follows without an edit.
+
+The **dose follows the money** — `avg_dose` reads `drawn_units ÷ head` where
+there is a draw. Otherwise a lot could show the protocol's 10 mL beside a cost
+that came from the 8 mL actually pulled.
+
+**Item 16 held.** All 10 lots snapshotted to `_proc_cost_snapshot_20261002`
+before and compared after: **$99,264.14 both times, not one lot moved a cent.**
+The only drawn receipt is lot 32-26's 1 Oct, 9 head, where implied and actual
+agree exactly at $109.72 — the layer is what set the catalog price. The two
+separate the first time a price changes between a purchase and a processing,
+and from then on the lot carries the price of the bottle that was used.
+
+An hour later the same gate reported lot 32-26 **up $266.16**, which is not
+this change: John had entered **355 lb** as the office estimate, so Valcor,
+Macrosyn and Synanthic started pricing — exactly what `2026-10-02c` built the
+estimate for. Proved by rebuilding the view body with the draw preference
+switched **off** and comparing lot by lot: catalog-only and drawn agree to the
+cent on all 10 lots *with* the estimate in place. The verify now exempts a lot
+priced off an estimate and **names it**, rather than failing forever on data
+that arrived after the snapshot.
+
+`rls_verify` then caught the snapshot table itself: a public table with RLS
+off, holding processing cost a lot. Dollars, and crew never sees dollars. It
+now reads like every other costed table — `can_read_books()` — and it is
+disposable once the FIFO costing has a month behind it. rls_verify: **PASS**.
+
+**Open on lot 32-26, and it needs John.** Three lines on the 1 Oct receipt read
+`to draw` — Valcor 63, Macrosyn 36, Synanthic 36 units. They were skipped when
+the receipt was saved because the dose was unknowable without a weight, and the
+weight came afterwards. The drug is out of the barn and the shelf does not know
+it. Re-saving that load out pulls them; Jake Taylor is locked only through
+30 Sep, so a 1 Oct draw is allowed.
+
+### One man, as many items as he took (2026-10-02)
+
+John: *"Need to be able to add multiple items on med checkout sheet per crew
+member."*
+
+The Checkouts screen took one medication at a time, which is not how the sheet
+in the medicine room is written — a name, then everything that went out under
+it. Four items meant picking the same man four times, and four log rows that
+nothing tied together.
+
+The form is now a date, a crew member, and a **grid of lines**: medication,
+bottles, bottle size, with `+ Line` and a ✕ per row. It follows
+`renderInvPurchaseLines()` — delegated handlers, and the number fields
+deliberately do **not** re-render, because re-rendering eats the caret.
+
+Three things it holds onto:
+
+- **one insert**, so a man's sheet lands whole or not at all. Half a sheet is
+  worse than none: the rest gets retyped and the first items are then in the
+  log twice.
+- **a typed size sticks to its medication**, per line. Saves retyping 100 down
+  a column of Excede; a size that stuck to the *box* would record the next
+  man's Resflor at Excede's size.
+- **the same drug twice at the same size is refused.** That is one checkout
+  written twice, not two bottles — the sheet never reads that way.
+
+After a save the last drug and size carry over to the fresh line, because a
+column of the sheet is usually the same drug. The **name does not**: filing one
+man's bottles under the man above him is the mistake this screen exists to
+avoid.
+
+No schema change. `med_txns.bottle_size` from `2026-10-01m` already carries the
+size per row, and a checkout is still `direction 0` — custody, not movement.
+
+### The starting weight estimate is required on a new lot (2026-10-02)
+
+John: *"Make the lot starting weight estimate mandatory info on starting new
+lot."*
+
+Lot 32-26 is why. Cattle are processed the day they land and the invoice comes
+days later, so while the lot has no weight every per-hundredweight med on the
+protocol doses at **nothing**: the drug goes in the cattle, the lot is charged
+$0 for it, and the shelf is never drawn down. Three of 32-26's eleven
+processing meds sat like that until a weight was typed the next day, and the
+three units had to be drawn by re-saving the load out.
+
+So the field is `required` on a new lot, with two carve-outs that are honest
+rather than convenient:
+
+- **Edit**, so a lot already on the books can still be saved for an unrelated
+  reason, and so a lot whose invoice has landed is not asked for a figure
+  nothing reads.
+- **The feed pen**, which takes cripples transferred in at $0 and is never
+  purchased or processed.
+
+Zero is not an answer either — checked in the save path, because `required`
+only stops a blank box. A duplicate counts as a new lot and is asked for its
+own figure.
+
+### Two views, two copies of the same costing (2026-10-02)
+
+Found answering *"Is the processing cost card correct in the lot page."* It was
+not. Fixed and applied the same day on John's go-ahead —
+`docs/sql/2026-10-02e_lot_processing_costs_one_source.sql`, OPEN-ITEMS **0j**.
+
+`lot_processing_costs` (the lot card and the closeout) and
+`lot_processing_cost_detail` (the report and the drilldown) each carry a
+private copy of the whole calculation. The detail got the weight estimate and
+the FIFO draw; the summary got neither. Lot 32-26 reads **$512.01** on the card
+and **$778.17** on the report. Every other lot agrees to the cent, which is
+what makes the fix safe to describe exactly: it moves one lot by $266.16 and
+nothing else.
+
+The fix makes the summary an aggregate over the detail. Duplicated maths
+drifts; this is the same reason the processing draw shares its dose expression
+with the costing view instead of restating it. Applied, it moved exactly what
+was measured: 32-26 to $778.17, the other nine to the cent, $99,264.14 →
+$99,530.31 across the place. The card and the report cannot disagree again,
+and the verify block asserts it lot by lot rather than trusting that.
+
+| file | what it did |
+|---|---|
+| `2026-10-02e_lot_processing_costs_one_source.sql` | the lot card and the report read one costing |
+| `2026-10-02f_med_id_tags_office_stock.sql` | 5,000 ID tags in the medicine room, #1001-6000 |
+| `2026-10-02g_med_jake_id_tags.sql` | Jake's #2-999, and his nine on the 1st covered |
+| `2026-10-02h_med_transfer.sql` | stock moves between pools, FIFO, at its own cost |
+| `2026-10-02i_med_jake_zero_cost_stock.sql` | previously expensed drug to Jake at $0, to use up |
+| `2026-10-02j_med_protivity_dose.sql` | Protivity doses 1 a head, so its free stock can draw |
+| `2026-10-02k_med_fifo_ignores_unpriced_draw.sql` | a draw that knows no price no longer beats the catalog |
+| `2026-10-02l_med_lot_tags_jake.sql` | 167 lot tags at Jake's, and nothing uncovered anywhere |
+| `2026-10-02m_med_lot_tags_zero_and_each.sql` | lot tags go in free; both tags counted in "each" |
+
+### Tags are stock, and the office block went on the shelf (2026-10-02)
+
+John: *"We have 5000 id tags #1001-6000 in med room. Put in inventory at the
+catalog price."*
+
+5,000 doses × $0.4056 = **$2,028.00**. The catalog carries ID Tag as a 50-dose
+bag at $20.28, so that is 100 bags, and `cost_per_unit` is a generated column
+off the bag — nothing set a price by hand.
+
+**It went in as an `adjustment` layer, not a count**, for three reasons in
+order of weight:
+
+1. The Ranch count for 30 Sep is **posted**. `med_locked_through('Ranch')` is
+   2026-09-30 and `med_purchase_lines` carries the period-lock trigger, so a
+   layer dated on or before that is refused outright. The tags were simply
+   never on that sheet.
+2. A count is the shelf as somebody saw it on a day. Posting one today would
+   lock the Ranch period through 2 Oct and shut the door on 1–2 Oct doctoring
+   still to be entered. Full counts at month end, every month — John's rule.
+3. Jayci's reconciliation is built on the 30 Sep balance. Found stock belongs
+   *after* it, in the open period, as its own line rather than as a changed
+   opening figure.
+
+The ledger trigger wrote the matching +5,000 row by itself; its note says what
+the stock is, where it came from and that the price is the catalog because the
+invoice has not been found — so the correction, when it lands, is this layer's
+`unit_cost` and nothing downstream has to be reversed. Nothing has drawn
+against it yet.
+
+Two traps this hit, both now commented in the file: `qty_units` on a purchase
+line is **generated** (`qty_bottles × bottle_size`) and refuses a value, the
+same way `medications.cost_per_unit` does; and the layer is unit-normalized
+(`bottle_size` 1, `qty_bottles` in units) like every other layer on the place,
+while `med_on_hand` still reports 100 bags because `bottles_equiv` divides by
+the catalog size.
+
+**What it did not do:** settle Jake Taylor's uncovered tags. His 1 Oct draw
+took 9 ID tags and 9 Lot tags off a shelf that holds neither, and those came
+out of his box 150 miles from the medicine room. Settling them here would
+charge the lot for tags that never moved. OPEN-ITEMS **0k**.
+
+### Previously expensed stock: John's call (2026-10-02)
+
+The office tags and some meds were bought and **expensed in a lump sum earlier
+in the year**, before there was a system to track them. Carrying them at
+catalog makes the lot costing right and arguably counts the dollars twice in
+the year; carrying them at zero makes the books right and distorts processing
+cost. Four options went to John, including a `previously_expensed` flag that
+would have let one shelf report FIFO value for costing and book value for the
+balance sheet.
+
+His answer, and it is the right one:
+
+> "All of this is a one off first month problem as we work through this
+> inventory. Only thing that will linger is the roughly six thousand tags at
+> $.40 cost roughly. Kind of immaterial in the dollars and was always handled
+> this way for ease of operation because no good system to handle."
+
+**So nothing was built.** Stock sits at catalog. The exposure is ~$2,429 of
+tags that drain as cattle get tagged, and nothing new joins it because every
+layer from here arrives with an invoice behind it. The machinery would have
+cost more than the number it tracked — which is the test for any of this.
+Reopen it only if a bulk buy is ever again expensed outside the system.
+
+### Moving stock between pools (2026-10-02)
+
+John: *"We do need a way to transfer meds possibly using the checkout to move
+between inventory pools. Probably won't happen often but does happen some."*
+
+There was no way to do it at all. A checkout is custody at **one** location —
+direction 0, nothing moves — and nothing else in the module crossed a location
+boundary.
+
+`med_transfer(medication, from, to, units, date, notes)` does three things,
+and the second is the one that matters:
+
+1. consumes at the source by FIFO, oldest layer first, **through
+   `med_consume()`** — not a second FIFO walk. A second walk is a second walk
+   to get wrong, and this module has already been bitten once by duplicated
+   maths (`lot_processing_costs`, `2026-10-02e`);
+2. rebuilds each consumed layer at the destination **at its own cost** — ship
+   600 mL off a $0.30 layer and a $0.38 layer and the destination gets both,
+   so the next draw there costs what the drug really cost. A blend would
+   quietly re-price inventory on the way out the door, which is the one thing
+   FIFO exists to prevent;
+3. carries the maker's lot number and the expiry with each layer. Drug does
+   not get younger by changing trucks.
+
+**A transfer is not a usage, so it gets none of usage's forgiveness.** Usage
+posts short against an empty shelf, because a treatment that happened must not
+be lost to a bookkeeping gap, and it slides its date into the open period for
+the same reason. Nobody hands over drug they do not have, and paperwork can be
+dated right, so a transfer refuses both: more than the shelf holds, or a date
+inside either pool's closed month.
+
+**No new `txn_type`.** The two sides are `adjustment` rows carrying reason
+`transfer_out` / `transfer_in`, the same way count shrink is an adjustment
+carrying reason `count`. A new type would have meant dropping and re-adding a
+CHECK constraint and — worse — every view that buckets by `txn_type` would
+have gone on tying while showing the movement in **no column at all**.
+
+So the roll-forward learned the movement properly: `transferred_in_*` and
+`transferred_out_*`, appended last, and transfers are **excluded** from
+Adjustments, where stock leaving for Jake's shelf would have read like shrink.
+The report's printed identity is now:
+
+> beginning + purchases + opening − used + adjustments + transfers + uncovered = ending
+
+and the migration's verify checks it on every row, rather than trusting it.
+
+**One screen, two destinations.** The Checkouts form grew "Out of which pool"
+and a "Goes to" picker with two groups — *a man (custody only, nothing moves)*
+and *another pool (moves the stock)*. Same multi-line grid, because it is the
+same question: what went out, how much, what size. The explanation above the
+form swaps to match, and the button says **Move stock** instead of Record
+checkout, because those are not the same act. Test pools are offered at
+neither end: a move out of one would inject invented stock into the books.
+
+A move does not appear in the checkout log, and the log says so — nobody is
+holding it. It shows on On hand immediately, and on Activity and the
+roll-forward as a transfer.
+
+### Giving previously expensed drug away at $0 (2026-10-02)
+
+John put three items on Jake's shelf at no cost, to be used up this month:
+1 x 250-dose UltraChoice, 4 x 50-dose Pinkeye, 9 x 10-dose Protivity — 540
+units. The catalog settled the arithmetic rather than a guess; his figures and
+the bottle sizes agree on all three.
+
+**$0 is right here and catalog was right for the tags**, and the difference is
+worth stating because it looks inconsistent. Tags are a recurring per-head cost
+that has to read right on every lot forever. This is a one-time leftover with
+an end date, already paid for once before there was a system, and charging a
+lot for it again would charge twice. The same reasoning John applied to
+Protivity back in July: give it to processing at no cost and burn it up.
+
+**"As the oldest inventory" is the one thing the period lock would not allow.**
+Jake is locked through 30 Sep by his posted count, so the earliest a layer can
+be dated is 1 Oct, and his existing UltraChoice and Pinkeye layers are dated
+30 Sep. FIFO orders by `received_date` first. Backdating would have meant
+un-posting the count his opening balance and Jayci's reconciliation rest on, to
+make an inventory figure read differently — not worth it, and not auditable
+afterwards. So they are dated 1 Oct with `sort_order` -1, ahead of everything
+else in the open period, and what FIFO will actually do is:
+
+| | what draws first |
+|---|---|
+| Protivity | nothing else exists — the $0 stock IS first |
+| Pinkeye | 47.25 costed doses, then the 200 free |
+| UltraChoice | 324.33 costed doses, then the 250 free |
+
+Over the month the total is identical; only which lot carries the real cost
+changes, and 47 head clears the costed pinkeye early anyway.
+
+**Protivity could not draw** until John gave the dose the same day: *"1 dose
+per hd 10 doses a bottle."* The bottle was already right at 10 doses — only
+`flat_dose_amount` was missing, so a draw had no dose to pull and those 90
+doses would have sat the way the per-hundredweight meds sat waiting on a
+weight. One field (`2026-10-02j`).
+
+Its **catalog price stays NULL on purpose.** Setting `bottle_cost` to 0 would
+say Protivity costs nothing in general; what is true is that the stock Jake was
+given is free, which is a fact about those 9 bottles and belongs on the layer,
+where it already is. Draws off that layer read $0 because they really were
+free; older receipts keep reading as a hole, which is honest.
+
+The item 16 gate held for a reason worth writing down: `cost_per_head_line`
+needs a *price*, and Protivity still has none, so giving it a dose cannot move
+a dollar anywhere — $99,530.31 before and after, same 5 lots carrying unpriced
+lines. What changed is that the line can now draw.
+
+One trap recorded in that file: when the free 90 doses run out, a further draw
+goes uncovered, and `med_consume` prices uncovered usage at the last cost it
+knows — which is now the $0 layer. It would book free and *not* be flagged
+unpriced, because that flag only raises when there is no number at all. The
+units still show as uncovered on screen. If Protivity is ever bought again,
+price it before it is used.
+
+**John transferred the Multi Min himself** to test the new screen: 3 x 500 mL,
+Ranch to Jake, carried at $0.612687, and the medicine room went 2,000 mL to
+500. The transfer worked in production on the day it shipped.
+
+### A draw that knows no price must not beat the catalog (2026-10-02)
+
+Found while checking Synovex Primer, which John had just set aside: *"No primer
+on hand so cost and size will be updated if we buy more, ignore for now."*
+
+**A correction to the record first.** Primer was described earlier in this
+chain as drawing at $0 and leaving holes on 61 receipts. That was wrong. Primer
+carries `cost_per_head` = **$2.02** and the lots are charged it — $3,308.76
+across the six live lots, none of it unpriced. What Primer actually lacks is
+`bottle_size`, which is a **shelf** problem rather than a cost problem: with no
+container size it cannot be counted in bottles and `med_on_hand` flags
+`needs_container_size`. Setting it aside until the next purchase is fine, and
+that is where it is.
+
+**The bug that fell out of looking.** `2026-10-02d` made a lot's processing
+cost prefer the actual FIFO draw over the catalog, which is right. But it
+preferred *any* draw — and `med_consume` writes a draw even when nothing on the
+shelf and nothing in the catalog can price it. That is the deliberate
+fail-soft: a treatment that happened must not be lost to a bookkeeping gap, so
+it books at zero and raises `cost_provisional`.
+
+Put those together on Primer — no stock, no per-unit price — and the next load
+out on either of its two active protocols would have written a provisional draw
+of $0, and the costing would have **preferred that zero over the $2.02 a head
+the catalog holds**. `drawn_cost` would be 0, which is not NULL, so the first
+branch wins. A real charge silently replaced by nothing, on every lot processed
+from here.
+
+One condition fixes it: the lateral ignores provisional draws. A draw that
+knows what it cost still wins, **including an uncovered one priced off the last
+layer we knew** — that figure is real. Only a draw carrying no price at all
+falls back to the catalog, which is what the catalog is for.
+
+Proved with a test that rolled itself back: a provisional, uncovered 10-unit
+Primer draw against 37X's receipt left its Primer at **$2.0200 a head before
+and $2.0200 after**. Zero provisional draws exist today, so this is a trap
+closed before it sprang.
+
+### Lot tags, and the tag story closed (2026-10-02)
+
+John: *"Had 167 lot tags as of yesterday morning. Were billed last month to
+cattle bulk let's put in inventory and give me a journal entry to pull that
+forward from last month."*
+
+167 x $0.4056 = **$67.74**, the same bag price the ID tags carry (50 for
+$20.28). **The location is Jake Taylor, settled by arithmetic rather than a
+guess:** his 1 Oct receipt drew 9 lot tags off a shelf that held none, and 167
+on hand that morning less the 9 he used leaves 158 — the identical pattern to
+his ID tags the same morning (998 less the same 9).
+
+`med_settle_uncovered()` covered his 9: **repriced 0**, lot 32-26 unmoved at
+$778.17. **Nothing on the place carries uncovered tag usage any more**, at
+either location, for either kind of tag:
+
+| location | tag | on hand | value |
+|---|---|---|---|
+| Ranch | ID | 5,000 | $2,028.00 |
+| Ranch | Lot | 0 | — |
+| Jake Taylor | ID | 989 | $401.14 |
+| Jake Taylor | Lot | 158 | $64.08 |
+
+**The layer carries no new money**, which is the point of the journal entry.
+The tags were billed in bulk to cattle in September, so the cash is already
+through a closed month's P&L; the entry capitalizes the 167 that were still on
+hand at 30 Sep rather than buying them again. Written up for Jayci and Brenda
+in `docs/worksheets/2026-10-02_lot-tag-journal-entry.txt`: debit medicine and
+supplies inventory $67.74, credit whichever account took the bulk bill, dated
+30 Sep.
+
+**With the one reconciling item stated out loud**, because it would otherwise
+surprise somebody: the shelf layer is dated **1 Oct** — Jake's September count
+is posted and the period lock will not take stock dated into it — while the
+books capitalize at **30 Sep**. So an inventory-to-GL tie at 30 Sep is off by
+exactly this $67.74, and agrees again from 1 Oct. The alternative, dating the
+entry 1 Oct, leaves September carrying the cost of tags nobody used. The
+memo recommends 30 Sep and says it is their call.
+
+A small nit left alone deliberately: Lot Tag carries `bottle_size_unit` 'mL',
+which is nonsense for a tag and reads as "1.000 mL a head" on the lot detail.
+It is label-only — `cost_per_unit` is `bottle_cost / bottle_size` and cares
+nothing for the word — so fixing it changes no number. It is still a data
+correction on live books, so it waits for John.
+
+### The lot tags go in free, and a tag is counted in "each" (2026-10-02)
+
+John, minutes after the journal entry was drafted: *"Let's put the lot tags in
+Jake's inventory at zero cost and will start adding cost with new purchases in
+future."* And: *"Let's change both lot tags and id tags to 'each' not doses."*
+
+**So there is no journal entry.** The tags were billed in bulk to cattle last
+month and the money is already through September, where it belongs.
+Capitalizing $67.74 would take a cost out of September that September is
+entitled to keep, for tags that will be gone inside a month. The memo written
+for Jayci and Brenda an hour earlier was **withdrawn in place** rather than
+deleted, so nobody can send a stale copy — the file now says do not post it,
+and reverse it if it was already posted.
+
+Two things went to zero: the layer, and **the 9 tags already drawn off it**. A
+consumed allocation is frozen on purpose — that is what makes a reversal exact
+— so zeroing it is a deliberate correction, not a recalculation. Leaving it
+would have charged 32-26 $3.65 for tags John had just declared free.
+
+What moved, and it is all that moved:
+
+| | before | after |
+|---|---|---|
+| 32-26 Lot Tag line | $17.04 | **$13.38** |
+| 32-26 total | $778.17 | **$774.52** |
+| processing, every lot | $99,530.31 | $99,526.66 |
+| on hand, both pools | $24,992.82 | $24,928.74 |
+
+The $13.38 left is right, not a leftover: the 30 Sep receipt (33 head) has no
+draw, so it still reads the catalog at $0.4056 a head; only the 1 Oct receipt
+(9 head) drew off the free layer. Across 42 head that blends to $0.3187. The
+**catalog price is deliberately not zeroed** — pre-go-live receipts read it,
+the same as every other medicine, and the next purchase needs somewhere to
+start.
+
+**ID tags stay at catalog**, and that is not an inconsistency. John's earlier
+call was that the ~6,000 at $0.40 are immaterial and should read right per head.
+The lot tags went the other way because they were billed in bulk to the cattle
+last month specifically. Different facts, different answer, both his.
+
+**"Each", not doses.** A tag is not a dose, and Lot Tag was carrying 'mL' —
+"1.000 mL a head" on the lot detail. Changed in the catalog *and* in the `unit`
+snapshot each existing tag layer carries, so the shelf does not show a mix.
+Label only: `cost_per_unit` is `bottle_cost / bottle_size` and cares nothing
+for the word, which the migration's verify proves by asserting the Lot Tag
+catalog still reads $0.4056 and the ID tags still value at $2,429.14.
+
+### The paper checkout sheet (2026-10-03)
+
+John: *"We need to build a pdf for a checkout record from med room. Name, date,
+list of main doctoring meds and couple 3 blank lines for written meds to keep
+list simple."* Then twice over, which is the useful part of the record:
+
+1. *"Don't want landscape, needs larger print and only need 6-8 records per
+   page."*
+2. *"Let's try 3 rows two columns, with check box immediately in front of name
+   not trailing, that was confusing."*
+
+`docs/worksheets/2026-10-03_med-room-checkout-sheet_12-blocks.pdf`, built from
+the `.html` beside it (Chromium `--print-to-pdf`). **Letter portrait, twelve
+blocks a page, three across and four down** — John's pick once the drug list came
+down to four. The same source builds eight two-across (`?cols=3` switches it).
+
+Twelve only fits because the trim freed the room: seven lines a block instead of
+nine. Getting the fourth row on took a little more — the count box 0.25in to
+0.23in and the write-on lines 0.20in to 0.18in — and that is the floor. A fifth
+row is not there, and shrinking the type to find one would undo the point of
+going portrait in the first place.
+
+The first cut was a 27-line landscape grid with the drugs as columns — maximum
+records, smallest print. Wrong instinct, and worth writing down: this sheet
+hangs in a medicine room and gets written on with a pen by somebody in a hurry.
+**Readable beats dense**, and the count box belongs where the hand lands first.
+
+So each block is one man drawing once: **Name**, then **Date / Init.**, then
+nine lines, each a **box first and the drug after it**. Six named drugs and
+three write-in lines. Trailing boxes read as though they belonged to the next
+drug down, which is exactly the confusion John named.
+
+**Four named drugs, John's final call** (2026-10-03): Enroflox 500 mL, Excede
+250 mL, Excede 100 mL, Resflor 500 mL. The usage counts say why that is the
+right four — Enroflox 1,012 times and Excede 1,004 between its two sizes are the
+sheet, Resflor 246 earns its line, and **Draxxin KP and Biomycin came off**: 35
+between them, with Biomycin's 2 doses last given in April. Thiamine, Vitamin K,
+Dectomax and Cydectin were never on it. All of them are what the blank lines are
+for.
+
+**No captions on the blank lines and no initials column**, also his call. A
+ruled line after a box says "write here" without being told, and the caption was
+one more thing to read on a sheet whose whole point is that it can be filled in
+without reading it. Initials were my addition, not his, and custody is already
+in the app the moment the sheet is entered.
+
+**Excede keeps two lines, one a size.** The place carries both and the app
+records the size that left the room, so printing the size means the crew writes
+only a count and the office cannot guess wrong.
+
+The footer is `position: fixed`, so it prints at the bottom of every page rather
+than stealing a block from the first one.
+
+### The Monday posting: Medication Application (2026-10-03)
+
+John: *"We need a medication usage report in the inventory section for redwing
+similar to the feed application report for feeds. We will probably run and enter
+on mondays similar to feeds."*
+
+**Inventory → Meds → Reports → "Medication Application — Redwing (weekly)"**, the
+first option in the picker, beside the roll-forward and the valuation. It shares
+that screen's date range, Copy rows and Print rather than growing a second one.
+
+**It opens on the week that just finished** — the same `fdRwLastWeek()` the feed
+report uses, last completed Monday–Sunday. Switching to it snaps the dates;
+typing a different range still works. Opening the Monday posting on a
+half-finished month would post a range nobody meant and look right doing it.
+
+**What it shows**: a block a lot — *Production Center 32-26* — then Processing
+and Treatment, each a line a medication with quantity, unit and dollars, a
+category subtotal, a lot total, and an all-lots total. The Redwing item code
+prints ahead of the name where one is set (none are yet: all 32 medications have
+`redwing_item_code` NULL).
+
+The grain is the **medication**, not the category, because a Redwing item is a
+medication and a category subtotal is one sum away for whoever only needs two
+numbers. Copy rows gives: lot, category, item code, medication, qty, unit, $.
+
+**`med_usage_by_lot`** (`docs/sql/2026-10-03_med_usage_by_lot.sql`) is what made
+it possible. `med_txns` carries a `ref_kind` and a `ref_id` and stops there, so
+nothing answered "which lot". The view resolves it:
+
+| ref_kind | resolves through | category |
+|---|---|---|
+| `delivery_receipt` | `delivery_receipts.lot_id` | **processing** |
+| `doctoring_event` | `doctoring_events.lot_id` | **treatment** |
+
+The category comes off the **reference**, not off `med_txns.reason`. A reason is
+free text somebody typed; the reference is what the row is attached to, and the
+two must not be able to disagree about whether a bottle was processing or
+doctoring.
+
+Three things it deliberately does **not** do:
+
+- **No location filter.** A lot is charged for the drug that went in the cattle
+  wherever the bottle stood — the medicine room, the truck or Jake's shelf — so
+  filtering by pool would post a week short by whatever the buyer used.
+- **Transfers are not usage.** A move between pools is an adjustment; the drug
+  has not gone into cattle yet, and posting it as consumption would charge it
+  twice when it finally is.
+- **No shrink.** It says so on screen rather than printing a zero that reads as
+  "none": shrink only exists once a count is posted, and counts are month end.
+  Those go off the roll-forward after the monthly count.
+
+Usage that resolves to no lot gets its own block rather than being dropped — it
+is real drug off the shelf and has to land somewhere in Redwing. The verify
+asserts every usage row in the ledger appears exactly once in the view and that
+the view's dollars equal the ledger's, because a posting that reads light is
+invisible until somebody reconciles.
+
+**The one thing still unknown is Redwing's own screen.** The feed report mirrors
+Redwing's Feed Application boxes field for field, because those were in hand.
+Nobody here has seen the medication entry screen, so this posts by medication
+and lot, which every version of that screen will need. If it turns out to have
+named boxes like the feed one, that is a mapping column on `medications` and a
+regrouping — the data underneath does not change.

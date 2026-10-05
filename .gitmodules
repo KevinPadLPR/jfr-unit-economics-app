@@ -1,4 +1,0 @@
-[submodule "public/client-app"]
-	path = public/client-app
-	url = https://github.com/johnfreagan/JFR-Ranch-cattle-management-office-app-.git
-	branch = main

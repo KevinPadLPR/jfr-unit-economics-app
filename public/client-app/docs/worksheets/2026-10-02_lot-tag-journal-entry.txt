@@ -1,0 +1,27 @@
+JFR RANCH CO. LTD.
+WITHDRAWN - no journal entry is needed for the lot tags
+Written 2 October 2026, withdrawn the same day
+
+PLEASE DISREGARD the entry this file previously held. It asked to
+capitalize 167 lot tags at $67.74 as of 30 September 2026. Do not post it.
+
+John's decision, 2 October: the lot tags go into the medicine inventory
+system at ZERO cost, and cost will start being carried with new purchases
+from here. The reasoning is that these tags were billed to us last month
+and charged in bulk to cattle, so the money is already through September
+where it belongs. Capitalizing them would take a cost out of September
+that September is entitled to keep, for $67.74 of tags that will be used
+up within the month.
+
+So:
+
+  - September keeps the bulk expense exactly as billed. No change.
+  - Nothing is capitalized. There is no entry to post.
+  - The inventory system carries the 158 tags still on hand at $0.00, so
+    it tracks the COUNT without claiming a value the books do not have.
+  - The next purchase of tags is entered with its invoice price, and from
+    then on the value and the cost of a tag are real in both places.
+
+If you have already posted the $67.74 entry, reverse it.
+
+Questions to John.

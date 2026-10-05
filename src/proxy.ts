@@ -26,5 +26,9 @@ export default auth((req) => {
 });
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|icon.svg|favicon.ico).*)"],
+  // client-app excluded: it's the client's own cattle-management app (public/client-app, a git
+  // submodule), served statically so it can live inside the Dashboard tab's iframe at the same
+  // origin. It has its own Supabase-based login -- our NextAuth gate has no business in front of
+  // it, and letting this gate catch it just bounced every request to our /login instead.
+  matcher: ["/((?!api|_next/static|_next/image|icon.svg|favicon.ico|client-app).*)"],
 };

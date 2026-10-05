@@ -1,11 +1,13 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Boxes, LayoutDashboard, TrendingUp, ClipboardList, LineChart, ListTree, FileText, LogOut } from "lucide-react";
-import { auth, signOut } from "@/auth";
+import { getSession } from "@/lib/session";
+import { createClient } from "@/lib/supabase/server";
 import { listGlLots } from "@/lib/data/cost-of-gain";
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
-  const session = await auth();
+  const session = await getSession();
 
   // "Lot Detail" has no page of its own (it's the dynamic /lots/[lot] route) --
   // land on the first open lot by default; the page's own dropdown picks any
@@ -55,7 +57,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           <form
             action={async () => {
               "use server";
-              await signOut({ redirectTo: "/login" });
+              const supabase = await createClient();
+              await supabase.auth.signOut();
+              redirect("/login");
             }}
           >
             <button

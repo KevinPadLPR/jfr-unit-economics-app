@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { signIn } from "next-auth/react";
+import { createClient } from "@/lib/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
@@ -17,9 +17,13 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    const res = await signIn("credentials", { email, password, redirect: false });
+    // Same account as public/client-app (John's office app) -- this is the client's
+    // own Supabase project, not a separate signup. An inactive or crew profile still
+    // authenticates fine here; proxy.ts is what sorts that into /rancher or /login.
+    const supabase = createClient();
+    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
     setLoading(false);
-    if (res?.error) {
+    if (signInError) {
       setError("Incorrect email or password.");
       return;
     }

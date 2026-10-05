@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // public/client-app is the client's own app, vendored in as a git submodule
+    // (see .gitmodules) -- its own code, own conventions, not ours to lint.
+    "public/client-app/**",
   ]),
 ]);
 

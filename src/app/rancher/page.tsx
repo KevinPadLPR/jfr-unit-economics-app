@@ -1,4 +1,6 @@
-import { auth, signOut } from "@/auth";
+import { redirect } from "next/navigation";
+import { getSession } from "@/lib/session";
+import { createClient } from "@/lib/supabase/server";
 import { listGlLots } from "@/lib/data/cost-of-gain";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,7 +18,7 @@ export const dynamic = "force-dynamic";
  * data (Cost of Gain, Market Position) - those stay admin-only.
  */
 export default async function RancherHome() {
-  const session = await auth();
+  const session = await getSession();
   const lots = listGlLots().filter((l) => (l.status ?? "").toLowerCase() === "open");
 
   return (
@@ -32,7 +34,9 @@ export default async function RancherHome() {
           <form
             action={async () => {
               "use server";
-              await signOut({ redirectTo: "/login" });
+              const supabase = await createClient();
+              await supabase.auth.signOut();
+              redirect("/login");
             }}
           >
             <Button type="submit" variant="outline">

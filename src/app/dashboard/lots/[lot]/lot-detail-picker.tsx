@@ -11,7 +11,7 @@ export function LotDetailPicker({ lots, current }: { lots: { lot: string; status
       label="Lot"
       value={current}
       options={lots.map((l) => ({ value: l.lot, label: `${l.lot}${l.status ? ` (${l.status})` : ""}` }))}
-      onChange={(value) => router.push(`/lots/${encodeURIComponent(value)}`)}
+      onChange={(value) => router.push(`/dashboard/lots/${encodeURIComponent(value)}`)}
       className="w-64"
       allowAll={false}
     />

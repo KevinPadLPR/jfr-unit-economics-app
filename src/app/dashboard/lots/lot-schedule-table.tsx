@@ -72,7 +72,7 @@ export function LotScheduleTable({ rows }: { rows: GlLotSummaryRow[] }) {
             {filtered.map((l) => (
               <TableRow key={l.lot}>
                 <TableCell className="font-medium">
-                  <Link href={`/lots/${encodeURIComponent(l.lot)}`} className="hover:underline">
+                  <Link href={`/dashboard/lots/${encodeURIComponent(l.lot)}`} className="hover:underline">
                     {l.lot}
                   </Link>
                 </TableCell>

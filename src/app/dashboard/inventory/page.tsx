@@ -81,7 +81,7 @@ function InventoryBody({ monthEnd }: { monthEnd: string }) {
                 {group.rows.map((row) => (
                   <TableRow key={row.lot}>
                     <TableCell className="font-medium">
-                      <Link href={`/lots/${encodeURIComponent(row.lot)}`} className="hover:underline">
+                      <Link href={`/dashboard/lots/${encodeURIComponent(row.lot)}`} className="hover:underline">
                         {row.lot}
                       </Link>
                     </TableCell>

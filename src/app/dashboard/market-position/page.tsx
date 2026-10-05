@@ -58,7 +58,7 @@ export default async function MarketPositionPage() {
             {rows.map((r) => (
               <TableRow key={r.lot}>
                 <TableCell className="font-medium">
-                  <Link href={`/lots/${encodeURIComponent(r.lot)}`} className="hover:underline">
+                  <Link href={`/dashboard/lots/${encodeURIComponent(r.lot)}`} className="hover:underline">
                     {r.lot}
                   </Link>
                   {r.lightCalfCaveat && (

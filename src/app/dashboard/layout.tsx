@@ -16,13 +16,13 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const defaultLot = lots.find((l) => (l.status ?? "").toLowerCase() === "open")?.lot ?? lots[0]?.lot;
 
   const NAV = [
-    { href: "/", label: "Overview", icon: LayoutDashboard },
-    { href: "/inventory", label: "Inventory", icon: Boxes },
-    { href: "/lots", label: "Master Lot Schedule", icon: ListTree },
-    { href: defaultLot ? `/lots/${encodeURIComponent(defaultLot)}` : "/lots", label: "Lot Detail", icon: FileText },
-    { href: "/cost-of-gain", label: "Cost of Gain", icon: TrendingUp },
-    { href: "/lot-scorecard", label: "Lot Scorecard", icon: ClipboardList },
-    { href: "/market-position", label: "Market Position", icon: LineChart },
+    { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
+    { href: "/dashboard/inventory", label: "Inventory", icon: Boxes },
+    { href: "/dashboard/lots", label: "Master Lot Schedule", icon: ListTree },
+    { href: defaultLot ? `/dashboard/lots/${encodeURIComponent(defaultLot)}` : "/dashboard/lots", label: "Lot Detail", icon: FileText },
+    { href: "/dashboard/cost-of-gain", label: "Cost of Gain", icon: TrendingUp },
+    { href: "/dashboard/lot-scorecard", label: "Lot Scorecard", icon: ClipboardList },
+    { href: "/dashboard/market-position", label: "Market Position", icon: LineChart },
   ];
 
   return (

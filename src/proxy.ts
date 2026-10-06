@@ -3,10 +3,14 @@ import { updateSession } from "@/lib/supabase/middleware";
 import { isClientRole, tierForRole } from "@/lib/roles";
 
 // Next.js 16 renamed middleware.ts -> proxy.ts (network boundary in front of the app).
-// Auth is the client's own Supabase project (user_profiles / current_user_role(), see
-// public/client-app/docs/security-model.md) -- not a separate login system. Office,
-// owner and accountant get the full dashboard; crew gets redirected to /rancher,
-// same as John's own app hides $ data from crew via its data-perm="office" CSS gate.
+//
+// Dead code as of the client-app integration: the matcher below now excludes every
+// path this function would otherwise see (/dashboard, /rancher, /login), so this
+// never actually runs. Left in place, unexercised, rather than deleted, pending a
+// decision on this file's disposition -- see dashboard-shell.tsx / rancher-header.tsx
+// / useClientSession.ts for the client-side replacement and why server-side cookie
+// auth can't work here (the client app's own supabase-js client persists its session
+// to localStorage, not cookies, so this middleware never saw it log in to begin with).
 export default async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
@@ -60,10 +64,19 @@ export const config = {
   // origin. It has its own Supabase-based login -- this gate has no business in front of it,
   // and letting this gate catch it just bounced every request to our /login instead.
   //
+  // dashboard/rancher/login excluded too: this middleware's auth check relies on an
+  // @supabase/ssr cookie session, but the client app's own login (public/client-app/
+  // index.html) writes its session to localStorage via a plain supabase-js client, never
+  // to a cookie -- so this middleware never actually saw a logged-in user and always
+  // redirected to /login, even for someone already signed into the client app clicking
+  // the Dashboard tab. DashboardShell / RancherGate (src/components/) now gate these
+  // routes client-side by reading that same localStorage session directly, which is the
+  // only way to actually share it with the client app.
+  //
   // Also excluded: any request whose last path segment has a file extension -- static assets
   // under public/ (brand/*.svg, etc.) were falling through this same hole before client-app was
   // ever added (pre-existing, not specific to this submodule): a plain <img src="/brand/..."> is
   // not a page navigation, so redirecting it to /login just serves the login page's HTML back as
   // the "image" and it never renders -- that's the broken logo on the login screen itself.
-  matcher: ["/((?!api|_next/static|_next/image|icon.svg|favicon.ico|client-app|.*\\.[\\w]+$).*)"],
+  matcher: ["/((?!api|_next/static|_next/image|icon.svg|favicon.ico|client-app|dashboard|rancher|login|.*\\.[\\w]+$).*)"],
 };

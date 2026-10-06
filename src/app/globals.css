@@ -3,41 +3,43 @@
 
 /*
  * JFR Ranch brand tokens.
- * Palette derived from the client's own longhorn field-app icon (near-black ink,
- * cream ground) extended with an olive-green primary and a rust/copper accent —
- * see /data/README.md and docs/brand-palette.md for how these were chosen and
- * validated for categorical chart use (dataviz color-formula six checks).
+ * Matched directly to the client app's own :root palette (public/client-app/
+ * index.html) now that this dashboard renders inside it, not next to it --
+ * cream ground, brown ink/accent, same border and radius values. See
+ * /data/README.md and docs/brand-palette.md for the dataviz-only categorical
+ * chart/status/provenance colors below, which are intentionally NOT matched
+ * to the client app (it has no chart palette of its own) and stay as validated.
  */
 :root {
-  --background: #f7f6f1;
-  --foreground: #1a1e16;
+  --background: #f5f5f0;
+  --foreground: #2c2c2a;
   --card: #ffffff;
-  --card-foreground: #1a1e16;
+  --card-foreground: #2c2c2a;
   --popover: #ffffff;
-  --popover-foreground: #1a1e16;
-  --primary: #3f5c2a;
+  --popover-foreground: #2c2c2a;
+  --primary: #5a3a1a;
   --primary-foreground: #ffffff;
-  --secondary: #f1efe6;
-  --secondary-foreground: #1a1e16;
-  --muted: #f1efe6;
-  --muted-foreground: #6b6a5e;
-  --accent: #efe6d8;
-  --accent-foreground: #1a1e16;
-  --destructive: #d03b3b;
+  --secondary: #ebeae3;
+  --secondary-foreground: #2c2c2a;
+  --muted: #ebeae3;
+  --muted-foreground: #73726c;
+  --accent: #f3ead0;
+  --accent-foreground: #5a3a1a;
+  --destructive: #993333;
   --destructive-foreground: #ffffff;
-  --border: #e3e1d5;
-  --input: #e3e1d5;
-  --ring: #6e8f2e;
-  --radius: 0.625rem;
+  --border: #d4d2c8;
+  --input: #d4d2c8;
+  --ring: #5a3a1a;
+  --radius: 0.5rem;
 
   --sidebar: #ffffff;
-  --sidebar-foreground: #1a1e16;
-  --sidebar-primary: #3f5c2a;
+  --sidebar-foreground: #2c2c2a;
+  --sidebar-primary: #5a3a1a;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #f1efe6;
-  --sidebar-accent-foreground: #1a1e16;
-  --sidebar-border: #e3e1d5;
-  --sidebar-ring: #6e8f2e;
+  --sidebar-accent: #ebeae3;
+  --sidebar-accent-foreground: #2c2c2a;
+  --sidebar-border: #d4d2c8;
+  --sidebar-ring: #5a3a1a;
 
   /* Categorical chart series (validated: node scripts/validate_palette.js — see docs/brand-palette.md) */
   --chart-1: #c1602a; /* rust / terracotta */
@@ -110,7 +112,7 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 
-  --font-sans: "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: Consolas, "Courier New", monospace;
   --font-heading: var(--font-sans);
 }

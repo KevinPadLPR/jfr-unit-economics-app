@@ -1160,8 +1160,9 @@
         </div>
         <div class="sub-tabs hidden" id="dashboardSubtabs" data-perm="office">
             <button class="sub-tab active" data-subtab="overview">Overview</button>
-            <button class="sub-tab" data-subtab="lots">Lots</button>
             <button class="sub-tab" data-subtab="inventory">Inventory</button>
+            <button class="sub-tab" data-subtab="lots">Master Lot Schedule</button>
+            <button class="sub-tab" data-subtab="lot-detail">Lot Detail</button>
             <button class="sub-tab" data-subtab="cost-of-gain">Cost of Gain</button>
             <button class="sub-tab" data-subtab="lot-scorecard">Lot Scorecard</button>
             <button class="sub-tab" data-subtab="market-position">Market Position</button>
@@ -10426,9 +10427,9 @@ window.addEventListener('unhandledrejection', function(e) {
     // at a route the first time its sub-tab is opened (dataset.loadedRoute guards re-navigating
     // away from whatever the user clicked around to inside the iframe itself).
     const DASHBOARD_ROUTES = {
-        overview: '/dashboard', lots: '/dashboard/lots', inventory: '/dashboard/inventory',
-        'cost-of-gain': '/dashboard/cost-of-gain', 'lot-scorecard': '/dashboard/lot-scorecard',
-        'market-position': '/dashboard/market-position',
+        overview: '/dashboard', inventory: '/dashboard/inventory', lots: '/dashboard/lots',
+        'lot-detail': '/dashboard/lot-detail', 'cost-of-gain': '/dashboard/cost-of-gain',
+        'lot-scorecard': '/dashboard/lot-scorecard', 'market-position': '/dashboard/market-position',
     };
     function showDashboardTab(subtab = 'overview') {
         hideAllViews();

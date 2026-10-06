@@ -201,7 +201,7 @@ describe("postMoveEntry", () => {
 
 describe("rollbackPosted", () => {
   it("reverses posted refs in reverse order, by kind", async () => {
-    const { supabase, queueFrom, queueRpc, fromCalls, rpcCalls } = createSupabaseMock();
+    const { supabase, queueFrom, queueRpc, rpcCalls } = createSupabaseMock();
     // Reversal order is [move, dead, doctoring] -- the reverse of posting order
     // [doctoring, dead, move] (doctoring/count/weight first, then head-math sorted by date).
     const deleteMove = queueRpc({ data: true }); // delete_move_event

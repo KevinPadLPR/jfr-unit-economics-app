@@ -17,8 +17,8 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    // Same account as public/client-app (John's office app) -- this is the client's
-    // own Supabase project, not a separate signup. An inactive or crew profile still
+    // Same account as the client's own cattle-management app -- this is the client's
+    // Supabase project, not a separate signup. An inactive or crew profile still
     // authenticates fine here; proxy.ts is what sorts that into /rancher or /login.
     const supabase = createClient();
     const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
@@ -27,7 +27,7 @@ export default function LoginPage() {
       setError("Incorrect email or password.");
       return;
     }
-    router.push("/dashboard");
+    router.push("/lots");
     router.refresh();
   }
 
@@ -37,8 +37,8 @@ export default function LoginPage() {
         <CardHeader className="items-center pb-2 text-center">
           {/* eslint-disable-next-line @next/next/no-img-element -- static SVG logo, no benefit from next/image's raster optimizer */}
           <img src="/brand/logo-lockup.svg" alt="JFR Ranch" width={160} height={140} />
-          <CardTitle className="text-lg text-foreground">Position Desk</CardTitle>
-          <CardDescription>Unit Economics &amp; Market Position</CardDescription>
+          <CardTitle className="text-lg text-foreground">JFR Ranch</CardTitle>
+          <CardDescription>Cattle Office</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={onSubmit} className="flex flex-col gap-3">

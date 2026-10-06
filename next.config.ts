@@ -1,13 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // One app, not two: the client's own cattle-management office app (public/client-app, a
-  // git submodule) is the single front door. Our own dashboard pages moved to /dashboard/*
-  // specifically so they don't collide with this -- the Dashboard tab's iframe inside
-  // client-app's index.html points at /dashboard, never at "/".
-  async rewrites() {
-    return [{ source: "/", destination: "/client-app/index.html" }];
-  },
+  // Phase 1 of the client-app-into-Next.js migration: "/" is a real Next.js route again
+  // (src/app/page.tsx) -- public/client-app/index.html is no longer rewritten to from here.
+  // It stays on disk (not yet deleted) for the tabs Phase 1 doesn't port
+  // (Health/Sales/Inventory/Reports/Settings), but nothing in this app links to it anymore.
 };
 
 export default nextConfig;

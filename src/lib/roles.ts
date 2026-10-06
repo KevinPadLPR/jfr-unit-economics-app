@@ -25,3 +25,16 @@ export type Tier = (typeof TIERS)[number];
 export function tierForRole(role: ClientRole): Tier {
   return role === "crew" ? "rancher" : "admin";
 }
+
+/**
+ * Finer than `tierForRole`: within the "admin" tier, `accountant` can read
+ * everything office/owner can (the Approvals queue included, per the vanilla
+ * app's `data-perm="office"` nav gate, which only ever excludes crew) but
+ * cannot write -- the vanilla app tags its Approve/Reject controls
+ * `data-write` separately from `data-perm`, and its own docs/database.md
+ * calls that tagging "cosmetic": RLS (office/owner named explicitly on the
+ * write policies) is the real enforcement, this is only the UI mirror of it.
+ */
+export function canWriteApprovals(role: ClientRole): boolean {
+  return role === "office" || role === "owner";
+}

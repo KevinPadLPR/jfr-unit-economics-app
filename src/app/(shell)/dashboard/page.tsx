@@ -8,6 +8,12 @@ import { MonthlySpendChart } from "./monthly-spend-chart";
 export const dynamic = "force-dynamic";
 
 export default async function OverviewPage() {
+  // NOTE: this page is genuinely slow (~7s), not broken -- getOverviewMetrics()/
+  // getMarketPosition() loop over every open lot and call getLotAttrsRollup()/
+  // getCrosswalkInfo() per lot, each its own Supabase round trip (an N+1 pattern that
+  // predates this migration phase; only the client they use changed here, not this
+  // shape). Worth fixing in a later phase (batch these into one query per page load
+  // instead of one per lot) -- flagged, not fixed, to keep this phase's diff focused.
   const [{ computed, unavailable, caveats }, marketPosition, monthlySpend] = await Promise.all([
     getOverviewMetrics(),
     getMarketPosition(),

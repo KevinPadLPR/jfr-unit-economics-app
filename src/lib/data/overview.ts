@@ -1,7 +1,7 @@
 import { listGlLots } from "@/lib/data/cost-of-gain";
 import { getMarketPosition } from "@/lib/data/market-position";
 import { getCrosswalkInfo, getLotAttrsRollup } from "@/lib/data/lot-attrs";
-import { createServiceClient } from "@/lib/supabase/service";
+import { createClient } from "@/lib/supabase/server";
 
 /**
  * The Position Desk spec's "front-page twelve" (Context - Dashboard Web App
@@ -47,7 +47,7 @@ export async function getOverviewMetrics() {
   // positions is the client's own NATIVE hedge register (not a ue_ table) -- small (a handful
   // of real rows today), so counting "confirmed" (not the seed data's 3 verification rows) in
   // application code is simpler and just as correct as a SQL NOT LIKE / IS NULL filter.
-  const supabase = createServiceClient();
+  const supabase = await createClient();
   const { data: positionRows, error } = await supabase.from("positions").select("notes");
   if (error) throw error;
   const confirmedCount = (positionRows ?? []).filter(

@@ -1,13 +1,17 @@
 import { createClient } from "@supabase/supabase-js";
 
 /**
- * Server-only client for Server Components (src/lib/data/*.ts) -- uses the service_role key,
- * which bypasses RLS, because there is no per-request user session to scope these reads to:
- * auth is entirely client-side now (see useClientSession.ts / DashboardShell), read directly off
- * the client app's own localStorage session, and a Server Component has no access to that.
- * Gating happens in the UI (DashboardShell/RancherGate won't render without a valid session);
- * this key must never reach a "use client" file or the browser bundle -- SUPABASE_SERVICE_ROLE_KEY
- * is deliberately NOT NEXT_PUBLIC_-prefixed so Next.js never inlines it client-side.
+ * Server-only client bypassing RLS entirely (service_role key) -- NOT the default anymore as
+ * of the Phase 1 client-app migration (see plan "Phase 1 -- migrate the client app into the
+ * Next.js dashboard"). src/lib/data/*.ts now uses the per-request user-scoped client
+ * (src/lib/supabase/server.ts's createClient()) so reads respect RLS as the signed-in user --
+ * required for anything that might sit in front of a SECURITY INVOKER RPC (see
+ * public/client-app/docs/database.md rule 6), which this key would silently bypass the gate on.
+ *
+ * Keep this only for a read that's deliberately role-agnostic (e.g. public reference data with
+ * no RLS policy at all) -- currently nothing in this repo needs that. This key must never reach
+ * a "use client" file or the browser bundle -- SUPABASE_SERVICE_ROLE_KEY is deliberately NOT
+ * NEXT_PUBLIC_-prefixed so Next.js never inlines it client-side.
  */
 export function createServiceClient() {
   return createClient(

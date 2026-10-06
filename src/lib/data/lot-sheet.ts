@@ -1,4 +1,4 @@
-import { createServiceClient } from "@/lib/supabase/service";
+import { createClient } from "@/lib/supabase/server";
 import { getGlLotSummary, getCostOfGain } from "@/lib/data/cost-of-gain";
 import { getLatestFeederSettle } from "@/lib/data/market-position";
 import { getLotAttrsRollup, getCrosswalkInfo } from "@/lib/data/lot-attrs";
@@ -15,7 +15,7 @@ export interface HeadMovementRow {
 }
 
 export async function getHeadMovements(lot: string): Promise<HeadMovementRow[]> {
-  const supabase = createServiceClient();
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("ue_gl_head_movements")
     .select("date, movement_type, head, lbs, amount, dollar_per_head, notes")
@@ -57,7 +57,7 @@ export interface LotActivityRow {
  * nothing here explains why they differ.
  */
 export async function getLotActivityLedger(lot: string): Promise<LotActivityRow[]> {
-  const supabase = createServiceClient();
+  const supabase = await createClient();
   const [movements, { data: expenseRows, error }] = await Promise.all([
     getHeadMovements(lot),
     supabase

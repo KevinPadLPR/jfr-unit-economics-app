@@ -1,4 +1,4 @@
-import { createServiceClient } from "@/lib/supabase/service";
+import { createClient } from "@/lib/supabase/server";
 import type { Provenance } from "@/lib/theme/colors";
 
 export interface LotAttrsRollup {
@@ -19,7 +19,7 @@ export interface LotAttrsRollup {
  * Context - Dashboard Web App Handoff.md §5b).
  */
 export async function getLotAttrsRollup(glLot: string, fallbackTargetAdg: number): Promise<LotAttrsRollup> {
-  const supabase = createServiceClient();
+  const supabase = await createClient();
   const { data: row, error } = await supabase
     .from("ue_master_lot_schedule")
     .select("has_app_data, adg_used, adg_source, projected_current_weight_app, weight_stale_over_60d")
@@ -63,7 +63,7 @@ export interface CrosswalkInfo {
 }
 
 export async function getCrosswalkInfo(glLot: string): Promise<CrosswalkInfo> {
-  const supabase = createServiceClient();
+  const supabase = await createClient();
   const { data: row, error } = await supabase
     .from("ue_lot_crosswalk")
     .select("match_type, decision_needed, note")

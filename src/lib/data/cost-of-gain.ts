@@ -1,4 +1,4 @@
-import { createServiceClient } from "@/lib/supabase/service";
+import { createClient } from "@/lib/supabase/server";
 import { sumReportAmount, getDirectCostBreakdown, FEED_FORAGE_LINES, HEALTH_LINES, DEATH_LOSS_LINE, LRP_LINE } from "@/lib/data/gl";
 import { getLotAttrsRollup, getCrosswalkInfo } from "@/lib/data/lot-attrs";
 import type { Provenance } from "@/lib/theme/colors";
@@ -42,7 +42,7 @@ export interface GlLotSummaryRow {
 }
 
 export async function getGlLotSummary(lot: string): Promise<GlLotSummaryRow | undefined> {
-  const supabase = createServiceClient();
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("ue_master_lot_schedule")
     .select("*")
@@ -53,7 +53,7 @@ export async function getGlLotSummary(lot: string): Promise<GlLotSummaryRow | un
 }
 
 export async function listGlLots(): Promise<GlLotSummaryRow[]> {
-  const supabase = createServiceClient();
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("ue_master_lot_schedule")
     .select("*")

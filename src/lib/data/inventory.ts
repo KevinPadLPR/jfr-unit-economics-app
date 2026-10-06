@@ -1,4 +1,4 @@
-import { createServiceClient } from "@/lib/supabase/service";
+import { createClient } from "@/lib/supabase/server";
 
 export interface InventoryLotRow {
   lot: string;
@@ -57,7 +57,7 @@ function sumTotals(rows: InventoryLotRow[]): InventoryTotals {
 
 /** Every month the GL has a head-days snapshot for, newest first. */
 export async function getAvailableMonths(): Promise<string[]> {
-  const supabase = createServiceClient();
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("ue_gl_head_days")
     .select("month_end")
@@ -76,7 +76,7 @@ export async function getAvailableMonths(): Promise<string[]> {
  * lot has since closed.
  */
 export async function getInventorySnapshot(monthEnd: string): Promise<InventorySnapshot> {
-  const supabase = createServiceClient();
+  const supabase = await createClient();
   const [{ data: headDays, error: headDaysError }, { data: schedule, error: scheduleError }] = await Promise.all([
     supabase
       .from("ue_gl_head_days")

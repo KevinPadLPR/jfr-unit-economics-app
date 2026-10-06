@@ -1,4 +1,4 @@
-import { createServiceClient } from "@/lib/supabase/service";
+import { createClient } from "@/lib/supabase/server";
 
 /**
  * Report-line groupings used by the Cost of Gain formulas — these mirror the
@@ -17,7 +17,7 @@ export const LRP_LINE = "LRP Insurance";
  * application code instead of a parameterized SQL filter, which views can't take cleanly.
  */
 export async function sumReportAmount(lot: string, opts: { reportLines?: string[]; reportSection?: string }): Promise<number> {
-  const supabase = createServiceClient();
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("ue_gl_lot_report_line_summary")
     .select("report_line, report_section, total")
@@ -40,7 +40,7 @@ export interface GlCostBreakdownRow {
 
 /** All Direct-section cost, grouped by line — used for the Cost of Gain breakdown chart. */
 export async function getDirectCostBreakdown(lot: string): Promise<GlCostBreakdownRow[]> {
-  const supabase = createServiceClient();
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("ue_gl_lot_report_line_summary")
     .select("report_line, total")
@@ -63,7 +63,7 @@ export interface WeeklyCostPoint {
  * same reason the Excel "Weekly Cost of Gain" block is dollars-only).
  */
 export async function getWeeklyCostSeries(lot: string): Promise<WeeklyCostPoint[]> {
-  const supabase = createServiceClient();
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("ue_gl_lot_week_cost")
     .select("week_end, direct, indirect")
@@ -81,7 +81,7 @@ export interface MonthlyHeadPoint {
 
 /** Head on hand at month-end, life-to-date — how this lot's count has moved over time. */
 export async function getMonthlyHeadSeries(lot: string): Promise<MonthlyHeadPoint[]> {
-  const supabase = createServiceClient();
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("ue_gl_head_days")
     .select("month_end, head_end")
@@ -100,7 +100,7 @@ export interface MonthlyRanchCostPoint {
 
 /** Direct + Indirect $ by month, across every lot — the whole ranch's spend, not one lot's. */
 export async function getRanchMonthlyCostSeries(): Promise<MonthlyRanchCostPoint[]> {
-  const supabase = createServiceClient();
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("ue_gl_ranch_month_cost")
     .select("month_end, direct, indirect")

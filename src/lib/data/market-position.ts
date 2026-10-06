@@ -1,4 +1,4 @@
-import { createServiceClient } from "@/lib/supabase/service";
+import { createClient } from "@/lib/supabase/server";
 import { listGlLots } from "@/lib/data/cost-of-gain";
 import { getLotAttrsRollup } from "@/lib/data/lot-attrs";
 import type { Provenance } from "@/lib/theme/colors";
@@ -21,7 +21,7 @@ export interface LatestQuote {
  * 2026-09-10_market_quotes_schedule.sql.
  */
 export async function getLatestFeederSettle(): Promise<LatestQuote | undefined> {
-  const supabase = createServiceClient();
+  const supabase = await createClient();
   const { data: row, error } = await supabase
     .from("market_quotes")
     .select("settle, quote_date, instrument")

@@ -1,4 +1,4 @@
-import { createServiceClient } from "@/lib/supabase/service";
+import { createClient } from "@/lib/supabase/server";
 
 export interface LotFlowNode {
   name: string;
@@ -27,7 +27,7 @@ export interface LotFlow {
  * empty flow.
  */
 export async function getLotFlow(lot: string, headOnHand: number): Promise<LotFlow | undefined> {
-  const supabase = createServiceClient();
+  const supabase = await createClient();
   const { data: totals, error } = await supabase
     .from("ue_gl_lot_head_flow")
     .select("purchased, born, transfer_in, sold, died, transfer_out")

@@ -12,7 +12,7 @@ import { BalanceBarChart } from "./balance-bar-chart";
 export const dynamic = "force-dynamic";
 
 export default async function InventoryPage({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
-  const months = getAvailableMonths();
+  const months = await getAvailableMonths();
   const { month: monthParam } = await searchParams;
   const monthEnd = monthParam && months.includes(monthParam) ? monthParam : months[0];
 
@@ -37,8 +37,8 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
   );
 }
 
-function InventoryBody({ monthEnd }: { monthEnd: string }) {
-  const snapshot = getInventorySnapshot(monthEnd);
+async function InventoryBody({ monthEnd }: { monthEnd: string }) {
+  const snapshot = await getInventorySnapshot(monthEnd);
   const { totals, rows, byLocation } = snapshot;
 
   return (

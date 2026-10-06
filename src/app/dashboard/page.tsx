@@ -8,9 +8,11 @@ import { MonthlySpendChart } from "./monthly-spend-chart";
 export const dynamic = "force-dynamic";
 
 export default async function OverviewPage() {
-  const { computed, unavailable, caveats } = getOverviewMetrics();
-  const marketPosition = getMarketPosition();
-  const monthlySpend = getRanchMonthlyCostSeries();
+  const [{ computed, unavailable, caveats }, marketPosition, monthlySpend] = await Promise.all([
+    getOverviewMetrics(),
+    getMarketPosition(),
+    getRanchMonthlyCostSeries(),
+  ]);
 
   return (
     <div className="flex flex-col gap-6">

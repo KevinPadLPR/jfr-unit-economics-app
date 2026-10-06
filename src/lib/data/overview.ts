@@ -1,7 +1,7 @@
 import { listGlLots } from "@/lib/data/cost-of-gain";
 import { getMarketPosition } from "@/lib/data/market-position";
 import { getCrosswalkInfo, getLotAttrsRollup } from "@/lib/data/lot-attrs";
-import { getDb } from "@/lib/db";
+import { createServiceClient } from "@/lib/supabase/service";
 
 /**
  * The Position Desk spec's "front-page twelve" (Context - Dashboard Web App
@@ -25,15 +25,15 @@ export interface OverviewMetric {
   unavailableReason?: string;
 }
 
-export function getOverviewMetrics() {
-  const lots = listGlLots();
+export async function getOverviewMetrics() {
+  const lots = await listGlLots();
   const openLots = lots.filter((l) => (l.status ?? "").toLowerCase() === "open");
-  const marketPosition = getMarketPosition();
+  const marketPosition = await getMarketPosition();
 
   let headOwned = 0;
   let poundsOwned = 0;
   for (const lot of openLots) {
-    const attrs = getLotAttrsRollup(lot.lot, lot.target_adg ?? 0);
+    const attrs = await getLotAttrsRollup(lot.lot, lot.target_adg ?? 0);
     const head = lot.head_on_hand ?? 0;
     const weight = attrs.projectedCurrentWeight ?? lot.avg_wt_in ?? 0;
     headOwned += head;
@@ -44,16 +44,26 @@ export function getOverviewMetrics() {
   const markedValue = marketPosition.reduce((s, r) => s + (r.markedValue ?? 0), 0);
   const unrealized = markedValue - costBasis;
 
-  const db = getDb();
-  const confirmedPositions = db
-    .prepare(`SELECT COUNT(*) AS n FROM positions WHERE notes NOT LIKE '%VERIFICATION ROW%' OR notes IS NULL`)
-    .get() as { n: number };
+  // positions is the client's own NATIVE hedge register (not a ue_ table) -- small (a handful
+  // of real rows today), so counting "confirmed" (not the seed data's 3 verification rows) in
+  // application code is simpler and just as correct as a SQL NOT LIKE / IS NULL filter.
+  const supabase = createServiceClient();
+  const { data: positionRows, error } = await supabase.from("positions").select("notes");
+  if (error) throw error;
+  const confirmedCount = (positionRows ?? []).filter(
+    (p) => !p.notes || !String(p.notes).includes("VERIFICATION ROW")
+  ).length;
 
   const today = new Date().toISOString().slice(0, 10);
   const lotsNeedingAction = openLots.filter((l) => l.target_out_date && l.target_out_date < today).length;
 
-  const staleWeightLots = openLots.filter((l) => getLotAttrsRollup(l.lot, 0).anyWeightStale).length;
-  const decisionNeededLots = openLots.filter((l) => getCrosswalkInfo(l.lot).decisionNeeded).length;
+  let staleWeightLots = 0;
+  let decisionNeededLots = 0;
+  for (const lot of openLots) {
+    const [attrs, crosswalk] = await Promise.all([getLotAttrsRollup(lot.lot, 0), getCrosswalkInfo(lot.lot)]);
+    if (attrs.anyWeightStale) staleWeightLots += 1;
+    if (crosswalk.decisionNeeded) decisionNeededLots += 1;
+  }
   const unbookedSummerGrazing = openLots.filter((l) => (l.production_year ?? 0) >= 2026).length; // known, dated gap
   const exceptions = staleWeightLots + decisionNeededLots;
 
@@ -67,7 +77,7 @@ export function getOverviewMetrics() {
       {
         key: "hedge_coverage",
         label: "Hedge coverage",
-        value: confirmedPositions.n === 0 ? "0% — no confirmed positions" : `${confirmedPositions.n} confirmed position(s)`,
+        value: confirmedCount === 0 ? "0% — no confirmed positions" : `${confirmedCount} confirmed position(s)`,
         provenance: "measured" as const,
       },
       { key: "lots_needing_action", label: "Lots needing action", value: `${lotsNeedingAction}`, provenance: "modeled" as const },

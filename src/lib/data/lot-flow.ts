@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/db";
+import { createServiceClient } from "@/lib/supabase/service";
 
 export interface LotFlowNode {
   name: string;
@@ -15,35 +15,25 @@ export interface LotFlow {
   links: LotFlowLink[];
 }
 
-interface Totals {
-  purchased: number;
-  born: number;
-  transfer_in: number;
-  sold: number;
-  died: number;
-  transfer_out: number;
-}
-
 /**
  * Life-to-date cattle flow for one lot: where the head came from (Purchased /
  * Born / Transfer In) and where they've gone (Sold / Died / Transfer Out /
- * still on hand), sized by head count. Built entirely from gl_head_days,
- * which is reconciled to the Cattle Inventory report to the penny for every
- * lot — not the app-only "source ranch" detail some lots also have (that
- * only covers a minority of lots; this covers all of them the same way).
- * Categories with zero head are omitted so the chart never shows an empty
- * flow.
+ * still on hand), sized by head count. Built from ue_gl_lot_head_flow (a
+ * Supabase view, already summed life-to-date across every month on record for
+ * this lot), which is reconciled to the Cattle Inventory report to the penny
+ * for every lot — not the app-only "source ranch" detail some lots also have
+ * (that only covers a minority of lots; this covers all of them the same
+ * way). Categories with zero head are omitted so the chart never shows an
+ * empty flow.
  */
-export function getLotFlow(lot: string, headOnHand: number): LotFlow | undefined {
-  const db = getDb();
-  const totals = db
-    .prepare(
-      `SELECT COALESCE(SUM(purchased),0) AS purchased, COALESCE(SUM(born),0) AS born,
-              COALESCE(SUM(transfer_in),0) AS transfer_in, COALESCE(SUM(sold),0) AS sold,
-              COALESCE(SUM(died),0) AS died, COALESCE(SUM(transfer_out),0) AS transfer_out
-       FROM gl_head_days WHERE lot = ?`
-    )
-    .get(lot) as Totals | undefined;
+export async function getLotFlow(lot: string, headOnHand: number): Promise<LotFlow | undefined> {
+  const supabase = createServiceClient();
+  const { data: totals, error } = await supabase
+    .from("ue_gl_lot_head_flow")
+    .select("purchased, born, transfer_in, sold, died, transfer_out")
+    .eq("lot", lot)
+    .maybeSingle();
+  if (error) throw error;
   if (!totals) return undefined;
 
   const isPositive = (pair: [string, number]): pair is [string, number] => pair[1] > 0;

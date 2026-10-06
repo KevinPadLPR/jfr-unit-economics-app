@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/db";
+import { createServiceClient } from "@/lib/supabase/service";
 import { listGlLots } from "@/lib/data/cost-of-gain";
 import { getLotAttrsRollup } from "@/lib/data/lot-attrs";
 import type { Provenance } from "@/lib/theme/colors";
@@ -15,16 +15,21 @@ export interface LatestQuote {
  * feeder_cattle strip. A real own-basis table (light calves vs. the 700-800lb
  * CME feeder contract) doesn't exist yet — see Pitfall C3 — so light-calf
  * lots get an explicit caveat badge instead of a quietly wrong mark.
+ *
+ * `market_quotes` is the client's own NATIVE table (not a ue_ one) -- fed live
+ * by a daily cron + edge function, see public/client-app/docs/sql/
+ * 2026-09-10_market_quotes_schedule.sql.
  */
-export function getLatestFeederSettle(): LatestQuote | undefined {
-  const db = getDb();
-  const row = db
-    .prepare(
-      `SELECT settle, quote_date, instrument FROM market_quotes
-       WHERE instrument = 'feeder_cattle'
-       ORDER BY quote_date DESC LIMIT 1`
-    )
-    .get() as { settle: number; quote_date: string; instrument: string } | undefined;
+export async function getLatestFeederSettle(): Promise<LatestQuote | undefined> {
+  const supabase = createServiceClient();
+  const { data: row, error } = await supabase
+    .from("market_quotes")
+    .select("settle, quote_date, instrument")
+    .eq("instrument", "feeder_cattle")
+    .order("quote_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
   if (!row) return undefined;
   return { settle: row.settle, quoteDate: row.quote_date, instrument: row.instrument };
 }
@@ -43,13 +48,13 @@ export interface MarketPositionRow {
 
 const LIGHT_CALF_THRESHOLD_LB = 600;
 
-export function getMarketPosition(): MarketPositionRow[] {
-  const settle = getLatestFeederSettle();
+export async function getMarketPosition(): Promise<MarketPositionRow[]> {
+  const [settle, lots] = await Promise.all([getLatestFeederSettle(), listGlLots()]);
+  const openLots = lots.filter((l) => (l.status ?? "").toLowerCase() === "open" && (l.head_on_hand ?? 0) > 0);
 
-  return listGlLots()
-    .filter((l) => (l.status ?? "").toLowerCase() === "open" && (l.head_on_hand ?? 0) > 0)
-    .map((l) => {
-      const attrs = getLotAttrsRollup(l.lot, l.target_adg ?? 0);
+  return Promise.all(
+    openLots.map(async (l) => {
+      const attrs = await getLotAttrsRollup(l.lot, l.target_adg ?? 0);
       const projectedWeightPerHead = attrs.projectedCurrentWeight ?? l.avg_wt_in;
       const headOnHand = l.head_on_hand ?? 0;
 
@@ -64,11 +69,12 @@ export function getMarketPosition(): MarketPositionRow[] {
         status: l.status,
         headOnHand: l.head_on_hand,
         projectedWeightPerHead,
-        weightProvenance: attrs.hasAppData ? "modeled" : "assumed",
+        weightProvenance: attrs.hasAppData ? ("modeled" as const) : ("assumed" as const),
         markedValue,
         costBasis,
         unrealized: markedValue !== null && costBasis !== null ? markedValue - costBasis : null,
         lightCalfCaveat: !!projectedWeightPerHead && projectedWeightPerHead < LIGHT_CALF_THRESHOLD_LB,
       };
-    });
+    })
+  );
 }

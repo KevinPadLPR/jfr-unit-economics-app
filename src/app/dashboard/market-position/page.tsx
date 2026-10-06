@@ -10,8 +10,8 @@ import { UnrealizedByLotChart } from "../unrealized-by-lot-chart";
 export const dynamic = "force-dynamic";
 
 export default async function MarketPositionPage() {
-  const rows = getMarketPosition();
-  const settle = getLatestFeederSettle();
+  const rows = await getMarketPosition();
+  const settle = await getLatestFeederSettle();
 
   const totalMarked = rows.reduce((s, r) => s + (r.markedValue ?? 0), 0);
   const totalCost = rows.reduce((s, r) => s + (r.costBasis ?? 0), 0);

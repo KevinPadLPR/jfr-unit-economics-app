@@ -27,15 +27,18 @@ const MOVEMENT_BADGE: Record<string, "good" | "neutral" | "critical" | "warning"
 export default async function LotSheetPage({ params }: { params: Promise<{ lot: string }> }) {
   const { lot: lotParam } = await params;
   const lot = decodeURIComponent(lotParam);
-  const sheet = getLotSheet(lot);
+  const sheet = await getLotSheet(lot);
   if (!sheet) notFound();
 
   const { summary } = sheet;
   const deathPct = summary.head_in ? ((summary.head_dead ?? 0) / summary.head_in) * 100 : null;
-  const flow = getLotFlow(lot, summary.head_on_hand ?? 0);
-  const monthlyHead = getMonthlyHeadSeries(lot);
-  const weeklyCost = getWeeklyCostSeries(lot);
-  const allLots = listGlLots().map((l) => ({ lot: l.lot, status: l.status }));
+  const [flow, monthlyHead, weeklyCost, allLotsRaw] = await Promise.all([
+    getLotFlow(lot, summary.head_on_hand ?? 0),
+    getMonthlyHeadSeries(lot),
+    getWeeklyCostSeries(lot),
+    listGlLots(),
+  ]);
+  const allLots = allLotsRaw.map((l) => ({ lot: l.lot, status: l.status }));
 
   return (
     <div className="flex flex-col gap-6">

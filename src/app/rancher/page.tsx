@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
  * data (Cost of Gain, Market Position) - those stay admin-only.
  */
 export default async function RancherHome() {
-  const lots = listGlLots().filter((l) => (l.status ?? "").toLowerCase() === "open");
+  const lots = (await listGlLots()).filter((l) => (l.status ?? "").toLowerCase() === "open");
 
   return (
     <main className="flex min-h-screen flex-col items-center gap-6 bg-background px-4 py-10">

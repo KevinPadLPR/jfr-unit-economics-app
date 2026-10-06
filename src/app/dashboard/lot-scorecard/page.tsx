@@ -4,7 +4,7 @@ import { ScorecardTable } from "./scorecard-table";
 export const dynamic = "force-dynamic";
 
 export default async function LotScorecardPage() {
-  const rows = getLotScorecard();
+  const rows = await getLotScorecard();
 
   return (
     <div className="flex flex-col gap-6">

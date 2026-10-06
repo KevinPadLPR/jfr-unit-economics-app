@@ -9,8 +9,8 @@ import { listGlLots } from "@/lib/data/cost-of-gain";
  */
 export const dynamic = "force-dynamic";
 
-export default function LotDetailRedirect() {
-  const lots = listGlLots();
+export default async function LotDetailRedirect() {
+  const lots = await listGlLots();
   const defaultLot = lots.find((l) => (l.status ?? "").toLowerCase() === "open")?.lot ?? lots[0]?.lot;
   redirect(defaultLot ? `/dashboard/lots/${encodeURIComponent(defaultLot)}` : "/dashboard/lots");
 }

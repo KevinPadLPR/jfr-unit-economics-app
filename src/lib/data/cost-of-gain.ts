@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/db";
+import { createServiceClient } from "@/lib/supabase/service";
 import { sumReportAmount, getDirectCostBreakdown, FEED_FORAGE_LINES, HEALTH_LINES, DEATH_LOSS_LINE, LRP_LINE } from "@/lib/data/gl";
 import { getLotAttrsRollup, getCrosswalkInfo } from "@/lib/data/lot-attrs";
 import type { Provenance } from "@/lib/theme/colors";
@@ -41,14 +41,26 @@ export interface GlLotSummaryRow {
   notes: string | null;
 }
 
-export function getGlLotSummary(lot: string): GlLotSummaryRow | undefined {
-  const db = getDb();
-  return db.prepare(`SELECT * FROM master_lot_schedule WHERE lot = ?`).get(lot) as GlLotSummaryRow | undefined;
+export async function getGlLotSummary(lot: string): Promise<GlLotSummaryRow | undefined> {
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from("ue_master_lot_schedule")
+    .select("*")
+    .eq("lot", lot)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as GlLotSummaryRow) ?? undefined;
 }
 
-export function listGlLots(): GlLotSummaryRow[] {
-  const db = getDb();
-  return db.prepare(`SELECT * FROM master_lot_schedule ORDER BY status, lot`).all() as unknown as GlLotSummaryRow[];
+export async function listGlLots(): Promise<GlLotSummaryRow[]> {
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from("ue_master_lot_schedule")
+    .select("*")
+    .order("status", { ascending: true })
+    .order("lot", { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as GlLotSummaryRow[];
 }
 
 export interface CostOfGainResult {
@@ -79,22 +91,25 @@ export interface CostOfGainResult {
  * Context - Dashboard Web App Handoff.md §6 and C.1 in the data-map notes) —
  * "total dollars first, divide at the end," never averaging $/lb across lots.
  */
-export function getCostOfGain(lot: string): CostOfGainResult | undefined {
-  const summary = getGlLotSummary(lot);
+export async function getCostOfGain(lot: string): Promise<CostOfGainResult | undefined> {
+  const summary = await getGlLotSummary(lot);
   if (!summary) return undefined;
 
   const headDays = summary.head_days ?? 0;
-  const attrs = getLotAttrsRollup(lot, summary.target_adg ?? 0);
+  const attrs = await getLotAttrsRollup(lot, summary.target_adg ?? 0);
   const poundsGained = headDays * attrs.adgUsed;
 
-  const feedForage = sumReportAmount(lot, { reportLines: FEED_FORAGE_LINES });
-  const health = sumReportAmount(lot, { reportLines: HEALTH_LINES });
-  const laborOverhead = sumReportAmount(lot, { reportSection: "Indirect" });
+  const [feedForage, health, laborOverhead, deathLoss, lrp, grazingSummerNative, costBreakdown] = await Promise.all([
+    sumReportAmount(lot, { reportLines: FEED_FORAGE_LINES }),
+    sumReportAmount(lot, { reportLines: HEALTH_LINES }),
+    sumReportAmount(lot, { reportSection: "Indirect" }),
+    sumReportAmount(lot, { reportLines: [DEATH_LOSS_LINE] }),
+    sumReportAmount(lot, { reportLines: [LRP_LINE] }),
+    sumReportAmount(lot, { reportLines: ["Grazing - Summer Native"] }),
+    getDirectCostBreakdown(lot),
+  ]);
   const operating = feedForage + health + laborOverhead;
-  const deathLoss = sumReportAmount(lot, { reportLines: [DEATH_LOSS_LINE] });
-  const lrp = sumReportAmount(lot, { reportLines: [LRP_LINE] });
   const allIn = operating + deathLoss + lrp;
-  const grazingSummerNative = sumReportAmount(lot, { reportLines: ["Grazing - Summer Native"] });
 
   const safeDiv = (n: number, d: number) => (d > 0 ? n / d : null);
 
@@ -117,15 +132,14 @@ export function getCostOfGain(lot: string): CostOfGainResult | undefined {
     cogAllIn: safeDiv(allIn, poundsGained),
     costPerHeadDayOperating: safeDiv(operating, headDays),
     grazingSummerNativeBooked: grazingSummerNative !== 0,
-    costBreakdown: getDirectCostBreakdown(lot),
+    costBreakdown,
   };
 }
 
 export type ConfidenceGrade = "H" | "M" | "L";
 
-export function getConfidenceGrade(lot: string): ConfidenceGrade {
-  const attrs = getLotAttrsRollup(lot, 0);
-  const crosswalk = getCrosswalkInfo(lot);
+export async function getConfidenceGrade(lot: string): Promise<ConfidenceGrade> {
+  const [attrs, crosswalk] = await Promise.all([getLotAttrsRollup(lot, 0), getCrosswalkInfo(lot)]);
   if (!attrs.hasAppData) return "L";
   if (crosswalk.decisionNeeded || attrs.anyWeightStale) return "M";
   return "H";

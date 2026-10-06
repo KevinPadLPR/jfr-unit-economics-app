@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/db";
+import { createServiceClient } from "@/lib/supabase/service";
 
 export interface InventoryLotRow {
   lot: string;
@@ -56,63 +56,57 @@ function sumTotals(rows: InventoryLotRow[]): InventoryTotals {
 }
 
 /** Every month the GL has a head-days snapshot for, newest first. */
-export function getAvailableMonths(): string[] {
-  const db = getDb();
-  return (
-    db
-      .prepare(`SELECT DISTINCT month_end FROM gl_head_days WHERE month_end IS NOT NULL ORDER BY month_end DESC`)
-      .all() as { month_end: string }[]
-  ).map((r) => r.month_end);
-}
-
-interface RawRow {
-  lot: string;
-  status: string | null;
-  location_type: string | null;
-  feed_type: string | null;
-  head_start: number | null;
-  purchased: number | null;
-  born: number | null;
-  transfer_in: number | null;
-  sold: number | null;
-  died: number | null;
-  transfer_out: number | null;
-  head_end: number | null;
+export async function getAvailableMonths(): Promise<string[]> {
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from("ue_gl_head_days")
+    .select("month_end")
+    .not("month_end", "is", null)
+    .order("month_end", { ascending: false });
+  if (error) throw error;
+  // No SELECT DISTINCT over PostgREST -- dedupe in application code instead, order already
+  // matches (newest first) since the query is already sorted.
+  return [...new Set((data ?? []).map((r) => r.month_end as string))];
 }
 
 /**
  * One month's ranch-wide head movement, by lot and grouped by location. Every
- * lot with a gl_head_days row for this month is included, regardless of its
+ * lot with a ue_gl_head_days row for this month is included, regardless of its
  * status today — the movement genuinely happened in that month even if the
  * lot has since closed.
  */
-export function getInventorySnapshot(monthEnd: string): InventorySnapshot {
-  const db = getDb();
-  const raw = db
-    .prepare(
-      `SELECT hd.lot, s.status, s.location_type, s.feed_type,
-              hd.head_start, hd.purchased, hd.born, hd.transfer_in, hd.sold, hd.died, hd.transfer_out, hd.head_end
-       FROM gl_head_days hd
-       LEFT JOIN master_lot_schedule s ON s.lot = hd.lot
-       WHERE hd.month_end = ?
-       ORDER BY hd.lot`
-    )
-    .all(monthEnd) as unknown as RawRow[];
+export async function getInventorySnapshot(monthEnd: string): Promise<InventorySnapshot> {
+  const supabase = createServiceClient();
+  const [{ data: headDays, error: headDaysError }, { data: schedule, error: scheduleError }] = await Promise.all([
+    supabase
+      .from("ue_gl_head_days")
+      .select("lot, head_start, purchased, born, transfer_in, sold, died, transfer_out, head_end")
+      .eq("month_end", monthEnd)
+      .order("lot", { ascending: true }),
+    supabase.from("ue_master_lot_schedule").select("lot, status, location_type, feed_type"),
+  ]);
+  if (headDaysError) throw headDaysError;
+  if (scheduleError) throw scheduleError;
 
-  const rows: InventoryLotRow[] = raw.map((r) => ({
-    lot: r.lot,
-    status: r.status,
-    locationType: r.location_type,
-    feedType: r.feed_type,
-    beginning: r.head_start ?? 0,
-    purchased: r.purchased ?? 0,
-    born: r.born ?? 0,
-    transferIn: r.transfer_in ?? 0,
-    transferOut: r.transfer_out ?? 0,
-    sold: r.sold ?? 0,
-    died: r.died ?? 0,
-    ending: r.head_end ?? 0,
-  }));
+  const scheduleByLot = new Map((schedule ?? []).map((s) => [s.lot as string, s]));
+
+  const rows: InventoryLotRow[] = (headDays ?? []).map((r) => {
+    const s = scheduleByLot.get(r.lot as string);
+    return {
+      lot: r.lot,
+      status: s?.status ?? null,
+      locationType: s?.location_type ?? null,
+      feedType: s?.feed_type ?? null,
+      beginning: r.head_start ?? 0,
+      purchased: r.purchased ?? 0,
+      born: r.born ?? 0,
+      transferIn: r.transfer_in ?? 0,
+      transferOut: r.transfer_out ?? 0,
+      sold: r.sold ?? 0,
+      died: r.died ?? 0,
+      ending: r.head_end ?? 0,
+    };
+  });
 
   const groups = new Map<string, InventoryLotRow[]>();
   for (const row of rows) {

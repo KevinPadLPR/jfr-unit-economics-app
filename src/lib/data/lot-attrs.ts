@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/db";
+import { createServiceClient } from "@/lib/supabase/service";
 import type { Provenance } from "@/lib/theme/colors";
 
 export interface LotAttrsRollup {
@@ -11,32 +11,21 @@ export interface LotAttrsRollup {
 }
 
 /**
- * `master_lot_schedule` is GL-lot-grain already — the Excel notebook now does
- * the head-weighted rollup across app cohorts (sub-lots like "37X-1") itself,
- * before syncing, so this is a single-row read, not a rollup computed here.
- * See docs/PROMPT - Master Schedule Unification.md §2 — this used to query
- * cohort-grain `lot_attrs_app_cohort` and average in JS; that table is
- * retired, replaced by the `has_app_data`/`adg_used`/`adg_source` columns
- * already on the one `master_lot_schedule` row for this lot.
- * Falls back to the flat, assumed Target ADG when a lot has no app data at
- * all (~5 of 14 real lots / 28% of head, permanently — see
+ * `ue_master_lot_schedule` is GL-lot-grain already — the Excel notebook does the
+ * head-weighted rollup across app cohorts (sub-lots like "37X-1") itself, before
+ * syncing, so this is a single-row read, not a rollup computed here. Falls back
+ * to the flat, assumed Target ADG when a lot has no app data at all (~5 of 14
+ * real lots / 28% of head, permanently — see
  * Context - Dashboard Web App Handoff.md §5b).
  */
-export function getLotAttrsRollup(glLot: string, fallbackTargetAdg: number): LotAttrsRollup {
-  const db = getDb();
-  const row = db
-    .prepare(
-      `SELECT has_app_data, adg_used, adg_source, projected_current_weight_app, weight_stale_over_60d
-       FROM master_lot_schedule
-       WHERE lot = ?`
-    )
-    .get(glLot) as {
-    has_app_data: string | null;
-    adg_used: number | null;
-    adg_source: string | null;
-    projected_current_weight_app: number | null;
-    weight_stale_over_60d: string | null;
-  } | undefined;
+export async function getLotAttrsRollup(glLot: string, fallbackTargetAdg: number): Promise<LotAttrsRollup> {
+  const supabase = createServiceClient();
+  const { data: row, error } = await supabase
+    .from("ue_master_lot_schedule")
+    .select("has_app_data, adg_used, adg_source, projected_current_weight_app, weight_stale_over_60d")
+    .eq("lot", glLot)
+    .maybeSingle();
+  if (error) throw error;
 
   if (!row || (row.has_app_data ?? "").toLowerCase() !== "yes") {
     return {
@@ -73,11 +62,15 @@ export interface CrosswalkInfo {
   note: string | null;
 }
 
-export function getCrosswalkInfo(glLot: string): CrosswalkInfo {
-  const db = getDb();
-  const row = db
-    .prepare(`SELECT match_type, decision_needed, note FROM lot_crosswalk WHERE gl_lot = ? LIMIT 1`)
-    .get(glLot) as { match_type: string | null; decision_needed: string | null; note: string | null } | undefined;
+export async function getCrosswalkInfo(glLot: string): Promise<CrosswalkInfo> {
+  const supabase = createServiceClient();
+  const { data: row, error } = await supabase
+    .from("ue_lot_crosswalk")
+    .select("match_type, decision_needed, note")
+    .eq("gl_lot", glLot)
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
 
   return {
     matchType: row?.match_type ?? null,

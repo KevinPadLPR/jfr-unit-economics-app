@@ -7,7 +7,7 @@ import { HeadByGroupChart } from "./head-by-group-chart";
 export const dynamic = "force-dynamic";
 
 export default async function LotsPage() {
-  const lots = listGlLots();
+  const lots = await listGlLots();
   const open = lots.filter((l) => (l.status ?? "").toLowerCase() === "open");
   const closed = lots.filter((l) => (l.status ?? "").toLowerCase() === "closed");
   const totalHeadOnHand = open.reduce((s, l) => s + (l.head_on_hand ?? 0), 0);

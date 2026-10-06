@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/db";
+import { createServiceClient } from "@/lib/supabase/service";
 
 /**
  * Report-line groupings used by the Cost of Gain formulas — these mirror the
@@ -11,28 +11,26 @@ export const HEALTH_LINES = ["Medicine", "Processing"];
 export const DEATH_LOSS_LINE = "Death Loss";
 export const LRP_LINE = "LRP Insurance";
 
-function placeholders(n: number) {
-  return new Array(n).fill("?").join(",");
-}
+/**
+ * ue_gl_lot_report_line_summary (Supabase view) is already grouped by
+ * (lot, report_section, report_line) -- this sums a handful of pre-aggregated rows in
+ * application code instead of a parameterized SQL filter, which views can't take cleanly.
+ */
+export async function sumReportAmount(lot: string, opts: { reportLines?: string[]; reportSection?: string }): Promise<number> {
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from("ue_gl_lot_report_line_summary")
+    .select("report_line, report_section, total")
+    .eq("lot", lot);
+  if (error) throw error;
 
-export function sumReportAmount(lot: string, opts: { reportLines?: string[]; reportSection?: string }): number {
-  const db = getDb();
-  const clauses = ["lot = ?"];
-  const params: (string | number)[] = [lot];
-
-  if (opts.reportLines?.length) {
-    clauses.push(`report_line IN (${placeholders(opts.reportLines.length)})`);
-    params.push(...opts.reportLines);
-  }
-  if (opts.reportSection) {
-    clauses.push("report_section = ?");
-    params.push(opts.reportSection);
-  }
-
-  const row = db
-    .prepare(`SELECT COALESCE(SUM(report_amount), 0) AS total FROM gl_transactions WHERE ${clauses.join(" AND ")}`)
-    .get(...params) as { total: number };
-  return row.total;
+  const rows = (data ?? []) as { report_line: string; report_section: string; total: number }[];
+  const filtered = rows.filter((r) => {
+    if (opts.reportLines?.length) return opts.reportLines.includes(r.report_line);
+    if (opts.reportSection) return r.report_section === opts.reportSection;
+    return false;
+  });
+  return filtered.reduce((s, r) => s + (r.total ?? 0), 0);
 }
 
 export interface GlCostBreakdownRow {
@@ -41,17 +39,16 @@ export interface GlCostBreakdownRow {
 }
 
 /** All Direct-section cost, grouped by line — used for the Cost of Gain breakdown chart. */
-export function getDirectCostBreakdown(lot: string): GlCostBreakdownRow[] {
-  const db = getDb();
-  return db
-    .prepare(
-      `SELECT report_line, ROUND(SUM(report_amount), 2) AS total
-       FROM gl_transactions
-       WHERE lot = ? AND report_section = 'Direct'
-       GROUP BY report_line
-       ORDER BY total DESC`
-    )
-    .all(lot) as unknown as GlCostBreakdownRow[];
+export async function getDirectCostBreakdown(lot: string): Promise<GlCostBreakdownRow[]> {
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from("ue_gl_lot_report_line_summary")
+    .select("report_line, total")
+    .eq("lot", lot)
+    .eq("report_section", "Direct")
+    .order("total", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as GlCostBreakdownRow[];
 }
 
 export interface WeeklyCostPoint {
@@ -65,21 +62,16 @@ export interface WeeklyCostPoint {
  * month-end only, so a weekly $/lb would show a false monthly spike (the
  * same reason the Excel "Weekly Cost of Gain" block is dollars-only).
  */
-export function getWeeklyCostSeries(lot: string): WeeklyCostPoint[] {
-  const db = getDb();
-  return db
-    .prepare(
-      `SELECT week_end,
-              ROUND(SUM(CASE WHEN report_section = 'Direct' THEN report_amount ELSE 0 END), 2) AS direct,
-              ROUND(SUM(CASE WHEN report_section = 'Indirect' THEN report_amount ELSE 0 END), 2) AS indirect
-       FROM gl_transactions
-       WHERE lot = ? AND week_end IS NOT NULL
-       GROUP BY week_end
-       ORDER BY week_end DESC
-       LIMIT 13`
-    )
-    .all(lot)
-    .reverse() as unknown as WeeklyCostPoint[];
+export async function getWeeklyCostSeries(lot: string): Promise<WeeklyCostPoint[]> {
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from("ue_gl_lot_week_cost")
+    .select("week_end, direct, indirect")
+    .eq("lot", lot)
+    .order("week_end", { ascending: false })
+    .limit(13);
+  if (error) throw error;
+  return ((data ?? []) as WeeklyCostPoint[]).reverse();
 }
 
 export interface MonthlyHeadPoint {
@@ -88,16 +80,16 @@ export interface MonthlyHeadPoint {
 }
 
 /** Head on hand at month-end, life-to-date — how this lot's count has moved over time. */
-export function getMonthlyHeadSeries(lot: string): MonthlyHeadPoint[] {
-  const db = getDb();
-  return db
-    .prepare(
-      `SELECT month_end, head_end
-       FROM gl_head_days
-       WHERE lot = ? AND month_end IS NOT NULL
-       ORDER BY month_end ASC`
-    )
-    .all(lot) as unknown as MonthlyHeadPoint[];
+export async function getMonthlyHeadSeries(lot: string): Promise<MonthlyHeadPoint[]> {
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from("ue_gl_head_days")
+    .select("month_end, head_end")
+    .eq("lot", lot)
+    .not("month_end", "is", null)
+    .order("month_end", { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as MonthlyHeadPoint[];
 }
 
 export interface MonthlyRanchCostPoint {
@@ -107,17 +99,12 @@ export interface MonthlyRanchCostPoint {
 }
 
 /** Direct + Indirect $ by month, across every lot — the whole ranch's spend, not one lot's. */
-export function getRanchMonthlyCostSeries(): MonthlyRanchCostPoint[] {
-  const db = getDb();
-  return db
-    .prepare(
-      `SELECT month_end,
-              ROUND(SUM(CASE WHEN report_section = 'Direct' THEN report_amount ELSE 0 END), 2) AS direct,
-              ROUND(SUM(CASE WHEN report_section = 'Indirect' THEN report_amount ELSE 0 END), 2) AS indirect
-       FROM gl_transactions
-       WHERE month_end IS NOT NULL
-       GROUP BY month_end
-       ORDER BY month_end ASC`
-    )
-    .all() as unknown as MonthlyRanchCostPoint[];
+export async function getRanchMonthlyCostSeries(): Promise<MonthlyRanchCostPoint[]> {
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from("ue_gl_ranch_month_cost")
+    .select("month_end, direct, indirect")
+    .order("month_end", { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as MonthlyRanchCostPoint[];
 }

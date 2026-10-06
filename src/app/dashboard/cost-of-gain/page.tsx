@@ -15,12 +15,12 @@ export default async function CostOfGainPage({
 }: {
   searchParams: Promise<{ lot?: string }>;
 }) {
-  const lots = listGlLots();
+  const lots = await listGlLots();
   const { lot: lotParam } = await searchParams;
   const lot = lotParam ?? lots[0]?.lot;
 
-  const cog = lot ? getCostOfGain(lot) : undefined;
-  const weekly = lot ? getWeeklyCostSeries(lot) : [];
+  const cog = lot ? await getCostOfGain(lot) : undefined;
+  const weekly = lot ? await getWeeklyCostSeries(lot) : [];
   const targetAdg = lots.find((l) => l.lot === lot)?.target_adg ?? null;
 
   return (

@@ -3,15 +3,9 @@
 import { useEffect, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { LogOut, type LucideIcon } from "lucide-react";
+import { Boxes, LayoutDashboard, TrendingUp, ClipboardList, LineChart, ListTree, FileText, LogOut } from "lucide-react";
 import { useClientSession } from "@/lib/useClientSession";
 import { createSharedClient } from "@/lib/supabase/shared";
-
-interface NavItem {
-  href: string;
-  label: string;
-  icon: LucideIcon;
-}
 
 /**
  * Gates and frames every /dashboard/* page. There is no login screen of our own:
@@ -19,8 +13,24 @@ interface NavItem {
  * only login in this deployment); a "rancher"-tier (client role "crew") session
  * is routed to /rancher within the same iframe, same as proxy.ts used to do
  * server-side before it was removed in favor of this client-side check.
+ *
+ * Built here, not passed as a prop: a Server Component (dashboard/layout.tsx)
+ * can only hand a Client Component serializable data, and lucide-react icons are
+ * component functions, not data -- passing them through a `nav` prop is exactly
+ * what 500'd the first version of this file in production (Next.js builds don't
+ * statically prerender a dynamic route like this one, so the "functions can't
+ * cross the server/client boundary" error only ever surfaced at request time).
  */
-export function DashboardShell({ nav, children }: { nav: NavItem[]; children: ReactNode }) {
+export function DashboardShell({ defaultLot, children }: { defaultLot?: string; children: ReactNode }) {
+  const nav = [
+    { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
+    { href: "/dashboard/inventory", label: "Inventory", icon: Boxes },
+    { href: "/dashboard/lots", label: "Master Lot Schedule", icon: ListTree },
+    { href: defaultLot ? `/dashboard/lots/${encodeURIComponent(defaultLot)}` : "/dashboard/lots", label: "Lot Detail", icon: FileText },
+    { href: "/dashboard/cost-of-gain", label: "Cost of Gain", icon: TrendingUp },
+    { href: "/dashboard/lot-scorecard", label: "Lot Scorecard", icon: ClipboardList },
+    { href: "/dashboard/market-position", label: "Market Position", icon: LineChart },
+  ];
   const session = useClientSession();
   const router = useRouter();
   const pathname = usePathname();

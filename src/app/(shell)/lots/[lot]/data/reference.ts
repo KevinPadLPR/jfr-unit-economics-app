@@ -74,3 +74,55 @@ export async function getMedicationCatalog(): Promise<MedicationCatalogEntry[]> 
   if (error) throw error;
   return data ?? [];
 }
+
+export interface ReceivingProtocol {
+  id: string;
+  name: string;
+  version_label: string | null;
+  protocol_type: string;
+  sex_class: string | null;
+}
+
+/** The Invoice modal's protocol dropdown (index.html:10111-10124). */
+export async function getReceivingProtocols(): Promise<ReceivingProtocol[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("protocols")
+    .select("id, name, version_label, protocol_type, sex_class")
+    .eq("is_active", true)
+    .order("protocol_type", { ascending: true })
+    .order("name", { ascending: true });
+  if (error) throw error;
+  return data ?? [];
+}
+
+/**
+ * Ported from lotDefaultProtocolId() (index.html:10086-10101): the protocol a new invoice most
+ * likely uses -- whichever active protocol was used on the lot's latest load out or invoice,
+ * else the one active `receiving`-type protocol if there's exactly one. Pre-picks a sensible
+ * default; the dropdown is a normal select and can always be changed.
+ */
+export async function getDefaultProtocolId(lotId: string, protocols: ReceivingProtocol[]): Promise<string> {
+  const supabase = await createClient();
+  const active = new Set(protocols.map((p) => p.id));
+  const [rc, inv] = await Promise.all([
+    supabase
+      .from("delivery_receipts")
+      .select("receiving_protocol_id, receipt_date")
+      .eq("lot_id", lotId)
+      .not("receiving_protocol_id", "is", null)
+      .order("receipt_date", { ascending: false })
+      .limit(1),
+    supabase
+      .from("invoices")
+      .select("receiving_protocol_id, invoice_date")
+      .eq("lot_id", lotId)
+      .not("receiving_protocol_id", "is", null)
+      .order("invoice_date", { ascending: false })
+      .limit(1),
+  ]);
+  const used = [...(rc.data ?? []), ...(inv.data ?? [])].map((r) => r.receiving_protocol_id).find((id) => active.has(id));
+  if (used) return used;
+  const receiving = protocols.filter((p) => p.protocol_type === "receiving");
+  return receiving.length === 1 ? receiving[0].id : "";
+}

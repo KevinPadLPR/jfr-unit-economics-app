@@ -1,13 +1,13 @@
 import { test, expect } from "@playwright/test";
 import { login, ACCOUNTANT, OFFICE } from "./helpers";
 
-// Phase 3/4/5's write controls (Record deaths / Write off missing / Stray returned / + Move /
-// Doctoring + New / Edit lot info / Duplicate lot / Close lot) are never clicked by any
-// Playwright spec -- this one only ever asserts visibility, same no-mutation rule as every
-// other spec in this suite (see playwright.config.ts). Phase 5 especially: no spec may ever
-// rename, close, or duplicate a real production lot.
+// Phase 3/4/5/6's write controls (Record deaths / Write off missing / Stray returned / + Move /
+// Doctoring + New / Edit lot info / Duplicate lot / Close lot / invoice + New, Edit, Delete) are
+// never clicked by any Playwright spec -- this one only ever asserts visibility, same
+// no-mutation rule as every other spec in this suite (see playwright.config.ts). No spec may
+// ever rename, close, or duplicate a real production lot, or save/delete a real invoice.
 
-test("accountant sees Animal Health and Moves read-only, with none of the new write controls", async ({ page }) => {
+test("accountant sees Animal Health, Moves and Purchases read-only, with none of the new write controls", async ({ page }) => {
   await login(page, ACCOUNTANT);
   const firstLotLink = page.getByRole("table").getByRole("row").nth(1).getByRole("link");
   const lotNumber = await firstLotLink.innerText();
@@ -26,9 +26,13 @@ test("accountant sees Animal Health and Moves read-only, with none of the new wr
 
   await page.getByRole("button", { name: "Moves", exact: true }).click();
   await expect(page.getByRole("button", { name: /\+ Move/ })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Purchases", exact: true }).click();
+  await expect(page.getByRole("button", { name: "+ New" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Edit" })).toHaveCount(0);
 });
 
-test("office sees the new write controls on Animal Health and Moves (never clicked)", async ({ page }) => {
+test("office sees the new write controls on Animal Health, Moves and Purchases (never clicked)", async ({ page }) => {
   test.skip(!OFFICE, "requires E2E_OFFICE_EMAIL/E2E_OFFICE_PASSWORD -- no office/owner test account provided yet");
   await login(page, OFFICE!);
   const firstLotLink = page.getByRole("table").getByRole("row").nth(1).getByRole("link");
@@ -46,4 +50,7 @@ test("office sees the new write controls on Animal Health and Moves (never click
 
   await page.getByRole("button", { name: "Moves", exact: true }).click();
   await expect(page.getByRole("button", { name: /\+ Move/ })).toBeVisible();
+
+  await page.getByRole("button", { name: "Purchases", exact: true }).click();
+  await expect(page.getByRole("button", { name: "+ New" })).toBeVisible();
 });

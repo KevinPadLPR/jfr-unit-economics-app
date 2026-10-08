@@ -11,10 +11,11 @@ import type { DoctoringEvent, DeathEvent, HeadAdjustment } from "./data/health";
 import type { MoveEvent, LotTransfer } from "./data/moves";
 import type { Sale } from "./data/sales";
 import type { AuditEvent } from "./data/audit";
-import type { ActivePasture, FieldAction, MedicationCatalogEntry } from "./data/reference";
+import type { ActivePasture, FieldAction, MedicationCatalogEntry, ReceivingProtocol } from "./data/reference";
 import { HealthActionButtons } from "./health-actions";
 import { MoveActionButton } from "./moves-actions";
 import { DoctoringActionButton } from "./doctoring-actions";
+import { NewInvoiceButton, InvoiceCardActions } from "./purchases-actions";
 import { DeleteEventButton } from "./delete-event-button";
 import { deleteDeath, deleteHeadAdjustment } from "./actions/health";
 import { deleteMove } from "./actions/moves";
@@ -99,21 +100,45 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Purchases({ purchases }: { purchases: Invoice[] }) {
-  if (purchases.length === 0) return <Empty>No purchase invoices on this lot yet.</Empty>;
+function Purchases({
+  lotId,
+  lotNumber,
+  canWrite,
+  protocols,
+  defaultProtocolId,
+  purchases,
+}: {
+  lotId: string;
+  lotNumber: string;
+  canWrite: boolean;
+  protocols: ReceivingProtocol[];
+  defaultProtocolId: string;
+  purchases: Invoice[];
+}) {
   return (
     <div className="flex flex-col gap-4">
-      {purchases.map((inv) => (
+      {canWrite && (
+        <div>
+          <NewInvoiceButton lotId={lotId} lotNumber={lotNumber} protocols={protocols} defaultProtocolId={defaultProtocolId} />
+        </div>
+      )}
+      {purchases.length === 0 ? (
+        <Empty>No purchase invoices on this lot yet.</Empty>
+      ) : (
+        purchases.map((inv) => (
         <Card key={inv.id}>
           <CardContent className="flex flex-col gap-3 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="font-medium text-foreground">
                 Invoice {inv.invoice_number ?? inv.id.slice(0, 8)} · {formatDate(inv.invoice_date)}
               </span>
-              <span className="text-sm text-muted-foreground">
-                {formatNumber(inv.head_count)} hd · {inv.total_weight_lb != null ? `${formatNumber(inv.total_weight_lb)} lb` : "—"} ·{" "}
-                {formatMoney(inv.total_cost)}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">
+                  {formatNumber(inv.head_count)} hd · {inv.total_weight_lb != null ? `${formatNumber(inv.total_weight_lb)} lb` : "—"} ·{" "}
+                  {formatMoney(inv.total_cost)}
+                </span>
+                <InvoiceCardActions invoice={inv} lotId={lotId} lotNumber={lotNumber} protocols={protocols} canWrite={canWrite} />
+              </div>
             </div>
             {inv.notes ? <p className="text-sm text-muted-foreground">{inv.notes}</p> : null}
             {inv.receipts.length > 0 ? (
@@ -150,7 +175,8 @@ function Purchases({ purchases }: { purchases: Invoice[] }) {
             ) : null}
           </CardContent>
         </Card>
-      ))}
+        ))
+      )}
     </div>
   );
 }
@@ -544,6 +570,8 @@ export function LotDetailTabs({
   activePastures,
   fieldActions,
   medicationCatalog,
+  receivingProtocols,
+  defaultProtocolId,
   canWrite,
   isOwner,
 }: {
@@ -561,6 +589,8 @@ export function LotDetailTabs({
   activePastures: ActivePasture[];
   fieldActions: FieldAction[];
   medicationCatalog: MedicationCatalogEntry[];
+  receivingProtocols: ReceivingProtocol[];
+  defaultProtocolId: string;
   canWrite: boolean;
   isOwner: boolean;
 }) {
@@ -586,7 +616,16 @@ export function LotDetailTabs({
       </div>
 
       {active === "current" && <CurrentlyIn status={status} locations={locations} />}
-      {active === "purchases" && <Purchases purchases={purchases} />}
+      {active === "purchases" && (
+        <Purchases
+          lotId={lot.id}
+          lotNumber={lot.lot_number}
+          canWrite={canWrite}
+          protocols={receivingProtocols}
+          defaultProtocolId={defaultProtocolId}
+          purchases={purchases}
+        />
+      )}
       {active === "health" && (
         <AnimalHealth
           lotNumber={lot.lot_number}

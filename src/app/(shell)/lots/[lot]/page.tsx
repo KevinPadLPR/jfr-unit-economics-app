@@ -5,17 +5,19 @@ import { getDoctoringEvents, getDeathLog, getHeadAdjustments } from "./data/heal
 import { getMoveHistory, getLotTransfers } from "./data/moves";
 import { getSales } from "./data/sales";
 import { getAuditLog } from "./data/audit";
+import { getActivePastures } from "./data/reference";
+import { getSession } from "@/lib/session";
+import { canWriteLotEntries } from "@/lib/roles";
 import { Badge } from "@/components/ui/badge";
 import { LotDetailTabs } from "./lot-detail-tabs";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Phase 2: the per-lot drill-in the vanilla app's detailView (index.html:1199-1510) shows.
- * Read-only this phase -- see the Phase 2 plan for why Closeout/Feed Pen are deferred.
- * Keyed by lot_number (what /lots links by and what a human types into a URL), NOT the
- * same concept as /dashboard/lots/[lot] (the Unit Economics GL-rollup page, a different
- * data source and audience that happens to use the same URL shape).
+ * Phase 2 shipped this read-only (Currently In, Purchases, Animal Health, Moves, Sales, Audit
+ * Log -- public/client-app/index.html:1199-1510). Phase 3 adds write support for Animal Health
+ * (new deaths, missing/stray head adjustments) and Moves (+ Move) -- see the Phase 3 plan for
+ * why Closeout/Feed Pen/Purchases/Sales/Transfers/the kebab menu stay deferred.
  */
 export default async function LotDetailPage({ params }: { params: Promise<{ lot: string }> }) {
   const { lot: lotParam } = await params;
@@ -24,18 +26,24 @@ export default async function LotDetailPage({ params }: { params: Promise<{ lot:
   const lot = await getLotByNumber(lotNumber);
   if (!lot || lot.is_test) notFound();
 
-  const [status, locations, purchases, doctoring, deaths, headAdjustments, moves, transfers, sales, audit] = await Promise.all([
-    getLotStatus(lot.id),
-    getCurrentLocations(lot.id),
-    getPurchases(lot.id),
-    getDoctoringEvents(lot.id),
-    getDeathLog(lot.id),
-    getHeadAdjustments(lot.id),
-    getMoveHistory(lot.id),
-    getLotTransfers(lot.id),
-    getSales(lot.id),
-    getAuditLog(lot.id),
-  ]);
+  const [session, status, locations, purchases, doctoring, deaths, headAdjustments, moves, transfers, sales, audit, activePastures] =
+    await Promise.all([
+      getSession(),
+      getLotStatus(lot.id),
+      getCurrentLocations(lot.id),
+      getPurchases(lot.id),
+      getDoctoringEvents(lot.id),
+      getDeathLog(lot.id),
+      getHeadAdjustments(lot.id),
+      getMoveHistory(lot.id),
+      getLotTransfers(lot.id),
+      getSales(lot.id),
+      getAuditLog(lot.id),
+      getActivePastures(),
+    ]);
+  const role = session?.user.role;
+  const canWrite = role ? canWriteLotEntries(role) : false;
+  const isOwner = role === "owner";
 
   return (
     <div className="flex flex-col gap-6">
@@ -57,6 +65,9 @@ export default async function LotDetailPage({ params }: { params: Promise<{ lot:
         transfers={transfers}
         sales={sales}
         audit={audit}
+        activePastures={activePastures}
+        canWrite={canWrite}
+        isOwner={isOwner}
       />
     </div>
   );

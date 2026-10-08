@@ -11,6 +11,12 @@ import type { DoctoringEvent, DeathEvent, HeadAdjustment } from "./data/health";
 import type { MoveEvent, LotTransfer } from "./data/moves";
 import type { Sale } from "./data/sales";
 import type { AuditEvent } from "./data/audit";
+import type { ActivePasture } from "./data/reference";
+import { HealthActionButtons } from "./health-actions";
+import { MoveActionButton } from "./moves-actions";
+import { DeleteEventButton } from "./delete-event-button";
+import { deleteDeath, deleteHeadAdjustment } from "./actions/health";
+import { deleteMove } from "./actions/moves";
 
 type SectionKey = "current" | "purchases" | "health" | "moves" | "sales" | "closeout" | "feedpen" | "audit";
 
@@ -148,16 +154,41 @@ function Purchases({ purchases }: { purchases: Invoice[] }) {
 }
 
 function AnimalHealth({
+  lotNumber,
+  lotId,
+  canWrite,
+  isOwner,
+  lotClosed,
+  lotIsFeedPen,
+  locations,
+  activePastures,
   doctoring,
   deaths,
   headAdjustments,
 }: {
+  lotNumber: string;
+  lotId: string;
+  canWrite: boolean;
+  isOwner: boolean;
+  lotClosed: boolean;
+  lotIsFeedPen: boolean;
+  locations: CurrentLocation[];
+  activePastures: ActivePasture[];
   doctoring: DoctoringEvent[];
   deaths: DeathEvent[];
   headAdjustments: HeadAdjustment[];
 }) {
   return (
     <div className="flex flex-col gap-4">
+      <HealthActionButtons
+        lotNumber={lotNumber}
+        lotId={lotId}
+        canWrite={canWrite}
+        lotClosed={lotClosed}
+        lotIsFeedPen={lotIsFeedPen}
+        locations={locations}
+        activePastures={activePastures}
+      />
       <Card>
         <CardContent className="p-4 pb-0">
           <h3 className="text-sm font-semibold text-foreground">Doctoring ({doctoring.length})</h3>
@@ -208,12 +239,13 @@ function AnimalHealth({
               <TableHead>Tag</TableHead>
               <TableHead>Cause</TableHead>
               <TableHead>Notes</TableHead>
+              {isOwner && <TableHead />}
             </TableRow>
           </TableHeader>
           <TableBody>
             {deaths.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5}>
+                <TableCell colSpan={isOwner ? 6 : 5}>
                   <Empty>No deaths recorded yet.</Empty>
                 </TableCell>
               </TableRow>
@@ -225,6 +257,11 @@ function AnimalHealth({
                   <TableCell>{d.tag_number ?? "—"}</TableCell>
                   <TableCell>{d.cause ?? "—"}</TableCell>
                   <TableCell className="text-muted-foreground">{d.notes ?? "—"}</TableCell>
+                  {isOwner && (
+                    <TableCell>
+                      <DeleteEventButton eventId={d.id} isOwner={isOwner} action={(eventId) => deleteDeath(lotNumber, eventId)} />
+                    </TableCell>
+                  )}
                 </TableRow>
               ))
             )}
@@ -244,12 +281,13 @@ function AnimalHealth({
               <TableHead>Tag</TableHead>
               <TableHead>Kind</TableHead>
               <TableHead>Notes</TableHead>
+              {isOwner && <TableHead />}
             </TableRow>
           </TableHeader>
           <TableBody>
             {headAdjustments.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5}>
+                <TableCell colSpan={isOwner ? 6 : 5}>
                   <Empty>No head written off or returned.</Empty>
                 </TableCell>
               </TableRow>
@@ -261,6 +299,11 @@ function AnimalHealth({
                   <TableCell>{h.tag_number ?? "—"}</TableCell>
                   <TableCell>{h.cause ?? "—"}</TableCell>
                   <TableCell className="text-muted-foreground">{h.notes ?? "—"}</TableCell>
+                  {isOwner && (
+                    <TableCell>
+                      <DeleteEventButton eventId={h.id} isOwner={isOwner} action={(eventId) => deleteHeadAdjustment(lotNumber, eventId)} />
+                    </TableCell>
+                  )}
                 </TableRow>
               ))
             )}
@@ -271,9 +314,37 @@ function AnimalHealth({
   );
 }
 
-function Moves({ moves, transfers }: { moves: MoveEvent[]; transfers: LotTransfer[] }) {
+function Moves({
+  lotNumber,
+  lotId,
+  canWrite,
+  isOwner,
+  headCurrent,
+  locations,
+  activePastures,
+  moves,
+  transfers,
+}: {
+  lotNumber: string;
+  lotId: string;
+  canWrite: boolean;
+  isOwner: boolean;
+  headCurrent: number | null;
+  locations: CurrentLocation[];
+  activePastures: ActivePasture[];
+  moves: MoveEvent[];
+  transfers: LotTransfer[];
+}) {
   return (
     <div className="flex flex-col gap-4">
+      <MoveActionButton
+        lotNumber={lotNumber}
+        lotId={lotId}
+        canWrite={canWrite}
+        headCurrent={headCurrent}
+        locations={locations}
+        activePastures={activePastures}
+      />
       <Card>
         <CardContent className="p-4 pb-0">
           <h3 className="text-sm font-semibold text-foreground">Move history ({moves.length})</h3>
@@ -286,12 +357,13 @@ function Moves({ moves, transfers }: { moves: MoveEvent[]; transfers: LotTransfe
               <TableHead>To</TableHead>
               <TableHead className="text-right">Head</TableHead>
               <TableHead>Notes</TableHead>
+              {isOwner && <TableHead />}
             </TableRow>
           </TableHeader>
           <TableBody>
             {moves.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5}>
+                <TableCell colSpan={isOwner ? 6 : 5}>
                   <Empty>No move history yet.</Empty>
                 </TableCell>
               </TableRow>
@@ -303,6 +375,11 @@ function Moves({ moves, transfers }: { moves: MoveEvent[]; transfers: LotTransfe
                   <TableCell>{m.to_pasture_name ?? "?"}</TableCell>
                   <TableCell className="text-right">{formatNumber(m.head_count)}</TableCell>
                   <TableCell className="text-muted-foreground">{m.notes ?? "—"}</TableCell>
+                  {isOwner && (
+                    <TableCell>
+                      <DeleteEventButton eventId={m.id} isOwner={isOwner} action={(eventId) => deleteMove(lotNumber, eventId)} />
+                    </TableCell>
+                  )}
                 </TableRow>
               ))
             )}
@@ -443,6 +520,9 @@ export function LotDetailTabs({
   transfers,
   sales,
   audit,
+  activePastures,
+  canWrite,
+  isOwner,
 }: {
   lot: LotRecord;
   status: LotStatusRecord | null;
@@ -455,6 +535,9 @@ export function LotDetailTabs({
   transfers: LotTransfer[];
   sales: Sale[];
   audit: AuditEvent[];
+  activePastures: ActivePasture[];
+  canWrite: boolean;
+  isOwner: boolean;
 }) {
   const [active, setActive] = useState<SectionKey>("current");
   const tabs = TABS.filter((t) => !t.feedPenOnly || lot.is_feed_pen);
@@ -479,8 +562,34 @@ export function LotDetailTabs({
 
       {active === "current" && <CurrentlyIn status={status} locations={locations} />}
       {active === "purchases" && <Purchases purchases={purchases} />}
-      {active === "health" && <AnimalHealth doctoring={doctoring} deaths={deaths} headAdjustments={headAdjustments} />}
-      {active === "moves" && <Moves moves={moves} transfers={transfers} />}
+      {active === "health" && (
+        <AnimalHealth
+          lotNumber={lot.lot_number}
+          lotId={lot.id}
+          canWrite={canWrite}
+          isOwner={isOwner}
+          lotClosed={!!lot.closed_at}
+          lotIsFeedPen={!!lot.is_feed_pen}
+          locations={locations}
+          activePastures={activePastures}
+          doctoring={doctoring}
+          deaths={deaths}
+          headAdjustments={headAdjustments}
+        />
+      )}
+      {active === "moves" && (
+        <Moves
+          lotNumber={lot.lot_number}
+          lotId={lot.id}
+          canWrite={canWrite}
+          isOwner={isOwner}
+          headCurrent={status?.head_current ?? null}
+          locations={locations}
+          activePastures={activePastures}
+          moves={moves}
+          transfers={transfers}
+        />
+      )}
       {active === "sales" && <Sales sales={sales} />}
       {active === "closeout" && <NotYetMigrated label="Closeout" />}
       {active === "feedpen" && <NotYetMigrated label="Feed pen" />}

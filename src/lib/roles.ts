@@ -38,3 +38,13 @@ export function tierForRole(role: ClientRole): Tier {
 export function canWriteApprovals(role: ClientRole): boolean {
   return role === "office" || role === "owner";
 }
+
+/**
+ * Same office/owner gate as `canWriteApprovals`, kept as its own named predicate for the
+ * Lot Detail page's direct-entry write actions (Phase 3) rather than reusing that one under a
+ * misleading name -- the two features are unrelated and this one shouldn't change if Approvals'
+ * write policy ever diverges from the lot detail page's.
+ */
+export function canWriteLotEntries(role: ClientRole): boolean {
+  return role === "office" || role === "owner";
+}

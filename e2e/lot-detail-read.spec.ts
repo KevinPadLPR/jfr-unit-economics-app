@@ -28,8 +28,8 @@ test("Lot detail page renders every read-only section for a real lot", async ({ 
     expect(hasTable + hasEmptyState).toBeGreaterThan(0);
   }
 
-  // Closeout and Feed pen are explicitly deferred to Phase 3 -- confirm the placeholder,
-  // not a write form, is what's behind them.
+  // Closeout and Feed pen stay deferred past Phase 3 too (see its plan) -- confirm the
+  // placeholder, not a write form, is what's behind them.
   await page.getByRole("button", { name: "Closeout", exact: true }).click();
   await expect(page.getByText("isn't migrated yet")).toBeVisible();
 });

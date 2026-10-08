@@ -57,6 +57,29 @@ export async function getLotStatus(lotId: string): Promise<LotStatusRecord | nul
   return data;
 }
 
+export interface LotEditDetail {
+  arrival_date: string | null;
+  source: string | null;
+  sex_class: string | null;
+  target_adg: number | null;
+  notes: string | null;
+  est_purchase_weight_lb: number | null;
+  est_weight_source: string | null;
+  no_precon: boolean | null;
+}
+
+/** The extra columns the Edit/Duplicate lot form needs beyond `LotRecord` (index.html:9868-9907). */
+export async function getLotEditDetail(lotId: string): Promise<LotEditDetail | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("lots")
+    .select("arrival_date, source, sex_class, target_adg, notes, est_purchase_weight_lb, est_weight_source, no_precon")
+    .eq("id", lotId)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
 /**
  * Ported from loadLotLocations() (public/client-app/index.html:25187-25194): the open
  * (moved_out is null) pasture assignments for this lot -- "where the lot is right now."

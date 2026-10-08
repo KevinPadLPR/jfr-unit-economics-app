@@ -4,24 +4,26 @@ import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 
 /**
- * Owner-only inline-confirm delete, reused for death / head-adjustment / move rows -- all
- * three are "one RPC, owner-only, reverses and restores head" shapes, matching the same
- * inline Confirm/Cancel pattern ApprovalsTable already uses for Reject.
+ * Inline-confirm delete, reused for death / head-adjustment / move / doctoring rows -- the
+ * first three are owner-only "one RPC, reverses and restores head" shapes, doctoring isn't
+ * (no `data-perm="owner"` on its delete button in the vanilla app); `canDelete` is the caller's
+ * own visibility gate either way. Matches the same inline Confirm/Cancel pattern
+ * ApprovalsTable already uses for Reject.
  */
 export function DeleteEventButton({
   eventId,
-  isOwner,
+  canDelete,
   action,
 }: {
   eventId: string;
-  isOwner: boolean;
+  canDelete: boolean;
   action: (eventId: string) => Promise<{ ok: boolean; message: string }>;
 }) {
   const [confirming, setConfirming] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  if (!isOwner) return null;
+  if (!canDelete) return null;
 
   function handleDelete() {
     startTransition(async () => {

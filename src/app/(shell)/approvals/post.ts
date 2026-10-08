@@ -7,12 +7,16 @@ export type PostedRef =
   | { kind: "lot_event"; id: string }
   | { kind: "lot_movement"; id: string };
 
-function normalizeTag(tag: string): string {
+/** Exported for reuse by the Lot Detail page's own direct-entry doctoring Action (Phase 4) --
+ * same tag normalization, not Approvals-specific logic. */
+export function normalizeTag(tag: string): string {
   const s = String(tag ?? "").trim();
   return /^nt/i.test(s) ? s.toUpperCase() : s;
 }
 
-function computeMedCost(med: ResolvedMed["med"], doseCc: number | null): number | null {
+/** Exported for reuse by Phase 4's direct-entry doctoring Action -- same cost-freeze rule,
+ * not Approvals-specific logic. `med` just needs the shape `LookupMedication | null`. */
+export function computeMedCost(med: ResolvedMed["med"], doseCc: number | null): number | null {
   if (!med) return null;
   // Bottle pricing wins when both a per-unit cost and a dose exist.
   if (med.cost_per_unit != null && doseCc != null && doseCc > 0) {
@@ -23,8 +27,9 @@ function computeMedCost(med: ResolvedMed["med"], doseCc: number | null): number 
   return null;
 }
 
-/** Ported from computeNextNTForLot() (index.html:28848-28872). */
-async function computeNextNTForLot(supabase: SupabaseClient, lotId: string): Promise<string> {
+/** Ported from computeNextNTForLot() (index.html:28848-28872). Exported for reuse by Phase 4's
+ * direct-entry doctoring Action -- same untagged-animal numbering, not Approvals-specific. */
+export async function computeNextNTForLot(supabase: SupabaseClient, lotId: string): Promise<string> {
   const { data, error } = await supabase
     .from("doctoring_events")
     .select("tag_number, no_tag, notes")
@@ -87,7 +92,7 @@ async function loadMedLedgerState(supabase: SupabaseClient): Promise<MedLedgerSt
  * the check is kept as a second, explicit line matching the vanilla app's own belt-and-
  * suspenders approach.
  */
-async function recordDoctoringUsage(
+export async function recordDoctoringUsage(
   supabase: SupabaseClient,
   role: ClientRole,
   eventId: string,
@@ -120,8 +125,9 @@ async function recordDoctoringUsage(
   }
 }
 
-/** Ported from invReverseDoctoringUsage() (index.html:36937-36948). */
-async function reverseDoctoringUsage(supabase: SupabaseClient, eventId: string): Promise<void> {
+/** Ported from invReverseDoctoringUsage() (index.html:36937-36948). Exported for reuse by
+ * Phase 4's direct-entry doctoring Action -- same FIFO reversal, not Approvals-specific. */
+export async function reverseDoctoringUsage(supabase: SupabaseClient, eventId: string): Promise<void> {
   try {
     const { data } = await supabase.from("med_txns").select("id").eq("ref_kind", "doctoring_event").eq("ref_id", eventId);
     for (const t of data ?? []) {

@@ -11,12 +11,14 @@ import type { DoctoringEvent, DeathEvent, HeadAdjustment } from "./data/health";
 import type { MoveEvent, LotTransfer } from "./data/moves";
 import type { Sale } from "./data/sales";
 import type { AuditEvent } from "./data/audit";
-import type { ActivePasture } from "./data/reference";
+import type { ActivePasture, FieldAction, MedicationCatalogEntry } from "./data/reference";
 import { HealthActionButtons } from "./health-actions";
 import { MoveActionButton } from "./moves-actions";
+import { DoctoringActionButton } from "./doctoring-actions";
 import { DeleteEventButton } from "./delete-event-button";
 import { deleteDeath, deleteHeadAdjustment } from "./actions/health";
 import { deleteMove } from "./actions/moves";
+import { deleteDoctoring } from "./actions/doctoring";
 
 type SectionKey = "current" | "purchases" | "health" | "moves" | "sales" | "closeout" | "feedpen" | "audit";
 
@@ -162,6 +164,8 @@ function AnimalHealth({
   lotIsFeedPen,
   locations,
   activePastures,
+  fieldActions,
+  medicationCatalog,
   doctoring,
   deaths,
   headAdjustments,
@@ -174,6 +178,8 @@ function AnimalHealth({
   lotIsFeedPen: boolean;
   locations: CurrentLocation[];
   activePastures: ActivePasture[];
+  fieldActions: FieldAction[];
+  medicationCatalog: MedicationCatalogEntry[];
   doctoring: DoctoringEvent[];
   deaths: DeathEvent[];
   headAdjustments: HeadAdjustment[];
@@ -190,8 +196,17 @@ function AnimalHealth({
         activePastures={activePastures}
       />
       <Card>
-        <CardContent className="p-4 pb-0">
+        <CardContent className="flex items-center justify-between p-4 pb-0">
           <h3 className="text-sm font-semibold text-foreground">Doctoring ({doctoring.length})</h3>
+          <DoctoringActionButton
+            lotNumber={lotNumber}
+            lotId={lotId}
+            canWrite={canWrite}
+            locations={locations}
+            activePastures={activePastures}
+            fieldActions={fieldActions}
+            medicationCatalog={medicationCatalog}
+          />
         </CardContent>
         <Table>
           <TableHeader>
@@ -202,12 +217,13 @@ function AnimalHealth({
               <TableHead>Pasture</TableHead>
               <TableHead>Meds</TableHead>
               <TableHead>Notes</TableHead>
+              {canWrite && <TableHead />}
             </TableRow>
           </TableHeader>
           <TableBody>
             {doctoring.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6}>
+                <TableCell colSpan={canWrite ? 7 : 6}>
                   <Empty>No doctoring events on this lot yet.</Empty>
                 </TableCell>
               </TableRow>
@@ -220,6 +236,11 @@ function AnimalHealth({
                   <TableCell>{e.ranch_name ?? "?"} / {e.pasture_name ?? "?"}</TableCell>
                   <TableCell>{e.meds.map((m) => m.medication_name).filter(Boolean).join(", ") || "—"}</TableCell>
                   <TableCell className="text-muted-foreground">{e.notes ?? "—"}</TableCell>
+                  {canWrite && (
+                    <TableCell>
+                      <DeleteEventButton eventId={e.id} canDelete={canWrite} action={(eventId) => deleteDoctoring(lotNumber, eventId)} />
+                    </TableCell>
+                  )}
                 </TableRow>
               ))
             )}
@@ -259,7 +280,7 @@ function AnimalHealth({
                   <TableCell className="text-muted-foreground">{d.notes ?? "—"}</TableCell>
                   {isOwner && (
                     <TableCell>
-                      <DeleteEventButton eventId={d.id} isOwner={isOwner} action={(eventId) => deleteDeath(lotNumber, eventId)} />
+                      <DeleteEventButton eventId={d.id} canDelete={isOwner} action={(eventId) => deleteDeath(lotNumber, eventId)} />
                     </TableCell>
                   )}
                 </TableRow>
@@ -301,7 +322,7 @@ function AnimalHealth({
                   <TableCell className="text-muted-foreground">{h.notes ?? "—"}</TableCell>
                   {isOwner && (
                     <TableCell>
-                      <DeleteEventButton eventId={h.id} isOwner={isOwner} action={(eventId) => deleteHeadAdjustment(lotNumber, eventId)} />
+                      <DeleteEventButton eventId={h.id} canDelete={isOwner} action={(eventId) => deleteHeadAdjustment(lotNumber, eventId)} />
                     </TableCell>
                   )}
                 </TableRow>
@@ -377,7 +398,7 @@ function Moves({
                   <TableCell className="text-muted-foreground">{m.notes ?? "—"}</TableCell>
                   {isOwner && (
                     <TableCell>
-                      <DeleteEventButton eventId={m.id} isOwner={isOwner} action={(eventId) => deleteMove(lotNumber, eventId)} />
+                      <DeleteEventButton eventId={m.id} canDelete={isOwner} action={(eventId) => deleteMove(lotNumber, eventId)} />
                     </TableCell>
                   )}
                 </TableRow>
@@ -521,6 +542,8 @@ export function LotDetailTabs({
   sales,
   audit,
   activePastures,
+  fieldActions,
+  medicationCatalog,
   canWrite,
   isOwner,
 }: {
@@ -536,6 +559,8 @@ export function LotDetailTabs({
   sales: Sale[];
   audit: AuditEvent[];
   activePastures: ActivePasture[];
+  fieldActions: FieldAction[];
+  medicationCatalog: MedicationCatalogEntry[];
   canWrite: boolean;
   isOwner: boolean;
 }) {
@@ -572,6 +597,8 @@ export function LotDetailTabs({
           lotIsFeedPen={!!lot.is_feed_pen}
           locations={locations}
           activePastures={activePastures}
+          fieldActions={fieldActions}
+          medicationCatalog={medicationCatalog}
           doctoring={doctoring}
           deaths={deaths}
           headAdjustments={headAdjustments}

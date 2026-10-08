@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
@@ -20,9 +21,8 @@ interface LotStatusRow {
 }
 
 /**
- * The client app's own operational lot list (navLots, index.html:1178-1199) -- per-lot
- * purchases/health/moves/sales/closeout detail in the vanilla app, a plain list here in
- * Phase 1 (no drill-in detail page yet, that's a later phase). NOT the same concept as
+ * The client app's own operational lot list (navLots, index.html:1178-1199). Each row links
+ * into /lots/[lot] (Phase 2) for the read-only per-lot drill-in. NOT the same concept as
  * /dashboard/lots (the Unit Economics "Master Lot Schedule" GL rollup, ue_master_lot_schedule)
  * -- this reads the client's own native lots/lot_status tables directly.
  */
@@ -70,7 +70,11 @@ export default async function LotsPage() {
           <TableBody>
             {[...open, ...closed].map((l) => (
               <TableRow key={l.lot_id}>
-                <TableCell className="font-medium">{l.lot_number}</TableCell>
+                <TableCell className="font-medium">
+                  <Link href={`/lots/${encodeURIComponent(l.lot_number)}`} className="text-primary hover:underline">
+                    {l.lot_number}
+                  </Link>
+                </TableCell>
                 <TableCell>
                   <Badge variant={l.closed_at ? "neutral" : "good"}>{l.closed_at ? "Closed" : "Open"}</Badge>
                 </TableCell>

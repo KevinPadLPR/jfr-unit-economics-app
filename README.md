@@ -26,10 +26,13 @@
 > - Run it: serve the repo root with any static file server (`npx serve .` or
 >   `python -m http.server`) and open `index.html`. Sign in with a real Supabase Auth
 >   account from the client's project -- same login every client-app user already has.
-> - Tests: `tests/dashboard.spec.js`, a read-only Playwright smoke suite (see that
->   file's header comment for how to run it -- `package.json` still needs a manual
->   `@playwright/test` devDependency added; an automated rewrite of it was blocked by
->   a safety guard on this run, see the final migration report).
+> - Tests: `tests/dashboard.spec.js`, a read-only Playwright smoke suite -- `npm install`
+>   then `npm test` (see that file's header comment and `tests/README.md` for the
+>   `TEST_ACCOUNTANT_EMAIL`/`TEST_ACCOUNTANT_PASSWORD` env vars it needs).
+> - `package.json`/`package-lock.json` have been trimmed to just this branch's own
+>   dev tooling (`@playwright/test`, `serve`) -- the leftover Next.js/React dependency
+>   list a first pass of this rewrite left in place has been removed; the shipped site
+>   itself still needs zero npm packages to run.
 >
 > ---
 >

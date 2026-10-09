@@ -1,4 +1,39 @@
-# JFR Ranch — Position Desk
+# JFR Ranch — Position Desk (vanilla JS)
+
+> **2026-10 rewrite notice:** this branch (`migration/dashboard-vanilla-js`) replaces
+> everything below with a plain HTML/CSS/JS build -- no build step, no React/Next.js,
+> no bundler -- so this dashboard matches the client's own vanilla-JS architecture
+> (`public/client-app/index.html`) and can eventually be folded into that single file.
+> The Next.js version this README originally documented still exists on `main`; the
+> sections below are kept for history/context (data model, brand notes) but the
+> **Quick start** section is stale -- see the summary just below instead.
+>
+> **New architecture, in short:**
+> - One static `.html` file per report under `dashboard/`, plus `index.html` (login)
+>   and `rancher.html` (crew view). "Dynamic routes" are a query string
+>   (`dashboard/lot-detail.html?lot=37X-1`), not a path segment -- there's no server.
+> - This app's own code is plain ES modules under `assets/js/` (`pages/*.js` per
+>   page, `data/*.js` mirroring the old `src/lib/data/*.ts` 1:1), loaded with
+>   `<script type="module">` -- no bundler needed, browsers run this natively.
+> - Supabase JS and Chart.js load from the same CDN URLs/versions
+>   `public/client-app/index.html` already uses (UMD builds, globals, no npm
+>   install required to run the site).
+> - Every read in `assets/js/data/*.js` goes through `assets/js/supabase-client.js`,
+>   which holds **only the anon/publishable key** plus a signed-in browser session,
+>   relying entirely on this project's existing RLS policies (`current_user_role()`)
+>   -- never the service_role key the old Next.js server code used. See that file's
+>   header comment before adding any new data module.
+> - Run it: serve the repo root with any static file server (`npx serve .` or
+>   `python -m http.server`) and open `index.html`. Sign in with a real Supabase Auth
+>   account from the client's project -- same login every client-app user already has.
+> - Tests: `tests/dashboard.spec.js`, a read-only Playwright smoke suite (see that
+>   file's header comment for how to run it -- `package.json` still needs a manual
+>   `@playwright/test` devDependency added; an automated rewrite of it was blocked by
+>   a safety guard on this run, see the final migration report).
+>
+> ---
+>
+> ## (Below: original Next.js-era README, describing the SQLite dev workflow on `main` -- not this branch)
 
 Unit Economics, Lot Scorecard, and Market Position dashboard for JFR Ranch Co. Ltd
 (Kosse, TX). Built on the same approved visual style as the K4 Ranches reference

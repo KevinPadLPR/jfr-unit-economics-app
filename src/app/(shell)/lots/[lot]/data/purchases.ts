@@ -98,3 +98,69 @@ export async function getPurchases(lotId: string): Promise<Invoice[]> {
     })),
   }));
 }
+
+export interface UnlinkedReceipt {
+  id: string;
+  receipt_date: string | null;
+  head_count: number | null;
+  tag_start: number | null;
+  tag_end: number | null;
+  missing_tags: number[] | null;
+  receiving_protocol_id: string | null;
+  invoice_id: string | null;
+  notes: string | null;
+  protocol_name: string | null;
+  destinations: LoadOutDestination[];
+}
+
+interface RawUnlinkedReceipt {
+  id: string;
+  receipt_date: string | null;
+  head_count: number | null;
+  tag_start: number | null;
+  tag_end: number | null;
+  missing_tags: number[] | null;
+  receiving_protocol_id: string | null;
+  invoice_id: string | null;
+  notes: string | null;
+  protocols: { name: string | null; version_label: string | null } | null;
+  load_out_destinations: RawDestination[] | null;
+}
+
+/**
+ * Ported from loadReceipts() (index.html:27167-27173): load-outs not (yet) linked to an
+ * invoice -- linked ones nest under their invoice in `getPurchases` instead. A new "+ Load Out"
+ * always lands here first; linking it to an invoice later (not built this phase) is what moves
+ * it into an invoice's own card.
+ */
+export async function getUnlinkedReceipts(lotId: string): Promise<UnlinkedReceipt[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("delivery_receipts")
+    .select(
+      "id, receipt_date, head_count, tag_start, tag_end, missing_tags, receiving_protocol_id, invoice_id, notes, " +
+        "protocols(name, version_label), load_out_destinations(head_count, pastures(name, ranches(name)))"
+    )
+    .eq("lot_id", lotId)
+    .is("invoice_id", null)
+    .order("receipt_date", { ascending: true });
+  if (error) throw error;
+
+  return ((data ?? []) as unknown as RawUnlinkedReceipt[]).map((r) => ({
+    id: r.id,
+    receipt_date: r.receipt_date,
+    head_count: r.head_count,
+    tag_start: r.tag_start,
+    tag_end: r.tag_end,
+    missing_tags: r.missing_tags,
+    receiving_protocol_id: r.receiving_protocol_id,
+    invoice_id: r.invoice_id,
+    notes: r.notes,
+    protocol_name: r.protocols ? `${r.protocols.name ?? ""}${r.protocols.version_label ? " " + r.protocols.version_label : ""}`.trim() || null : null,
+    destinations: (r.load_out_destinations ?? []).map((d) => ({
+      head_count: d.head_count,
+      pasture_name: d.pastures?.name ?? null,
+      ranch_name: d.pastures?.ranches?.name ?? null,
+    })),
+  }));
+}

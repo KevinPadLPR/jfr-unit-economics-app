@@ -29,6 +29,7 @@ test("accountant sees Animal Health, Moves and Purchases read-only, with none of
 
   await page.getByRole("button", { name: "Purchases", exact: true }).click();
   await expect(page.getByRole("button", { name: "+ New" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "+ Load Out" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Edit" })).toHaveCount(0);
 });
 
@@ -53,4 +54,5 @@ test("office sees the new write controls on Animal Health, Moves and Purchases (
 
   await page.getByRole("button", { name: "Purchases", exact: true }).click();
   await expect(page.getByRole("button", { name: "+ New" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "+ Load Out" })).toBeVisible();
 });

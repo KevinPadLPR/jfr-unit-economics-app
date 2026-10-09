@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { getLotByNumber, getLotStatus, getCurrentLocations, getLotEditDetail } from "./data/lot";
-import { getPurchases } from "./data/purchases";
+import { getPurchases, getUnlinkedReceipts } from "./data/purchases";
 import { getDoctoringEvents, getDeathLog, getHeadAdjustments } from "./data/health";
 import { getMoveHistory, getLotTransfers } from "./data/moves";
 import { getSales } from "./data/sales";
@@ -46,6 +46,7 @@ export default async function LotDetailPage({ params }: { params: Promise<{ lot:
     medicationCatalog,
     editDetail,
     receivingProtocols,
+    unlinkedReceipts,
   ] = await Promise.all([
     getSession(),
     getLotStatus(lot.id),
@@ -63,6 +64,7 @@ export default async function LotDetailPage({ params }: { params: Promise<{ lot:
     getMedicationCatalog(),
     getLotEditDetail(lot.id),
     getReceivingProtocols(),
+    getUnlinkedReceipts(lot.id),
   ]);
   const defaultProtocolId = await getDefaultProtocolId(lot.id, receivingProtocols);
   const role = session?.user.role;
@@ -97,6 +99,7 @@ export default async function LotDetailPage({ params }: { params: Promise<{ lot:
         medicationCatalog={medicationCatalog}
         receivingProtocols={receivingProtocols}
         defaultProtocolId={defaultProtocolId}
+        unlinkedReceipts={unlinkedReceipts}
         canWrite={canWrite}
         isOwner={isOwner}
       />

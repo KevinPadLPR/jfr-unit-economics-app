@@ -6,7 +6,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { NotYetMigrated } from "@/components/app-shell/not-yet-migrated";
 import { formatDate, formatMoney, formatNumber } from "@/lib/format";
 import type { LotRecord, LotStatusRecord, CurrentLocation } from "./data/lot";
-import type { Invoice } from "./data/purchases";
+import type { Invoice, UnlinkedReceipt } from "./data/purchases";
 import type { DoctoringEvent, DeathEvent, HeadAdjustment } from "./data/health";
 import type { MoveEvent, LotTransfer } from "./data/moves";
 import type { Sale } from "./data/sales";
@@ -16,6 +16,7 @@ import { HealthActionButtons } from "./health-actions";
 import { MoveActionButton } from "./moves-actions";
 import { DoctoringActionButton } from "./doctoring-actions";
 import { NewInvoiceButton, InvoiceCardActions } from "./purchases-actions";
+import { NewLoadOutButton, ReceiptCardActions } from "./load-out-actions";
 import { DeleteEventButton } from "./delete-event-button";
 import { deleteDeath, deleteHeadAdjustment } from "./actions/health";
 import { deleteMove } from "./actions/moves";
@@ -104,24 +105,101 @@ function Purchases({
   lotId,
   lotNumber,
   canWrite,
+  fiscalYear,
+  activePastures,
   protocols,
   defaultProtocolId,
   purchases,
+  unlinkedReceipts,
 }: {
   lotId: string;
   lotNumber: string;
   canWrite: boolean;
+  fiscalYear: string | null;
+  activePastures: ActivePasture[];
   protocols: ReceivingProtocol[];
   defaultProtocolId: string;
   purchases: Invoice[];
+  unlinkedReceipts: UnlinkedReceipt[];
 }) {
   return (
     <div className="flex flex-col gap-4">
       {canWrite && (
-        <div>
+        <div className="flex flex-wrap gap-2">
           <NewInvoiceButton lotId={lotId} lotNumber={lotNumber} protocols={protocols} defaultProtocolId={defaultProtocolId} />
+          <NewLoadOutButton
+            lotId={lotId}
+            lotNumber={lotNumber}
+            fiscalYear={fiscalYear}
+            activePastures={activePastures}
+            protocols={protocols}
+            defaultProtocolId={defaultProtocolId}
+            invoices={purchases}
+          />
         </div>
       )}
+
+      <Card>
+        <CardContent className="p-4 pb-0">
+          <h3 className="text-sm font-semibold text-foreground">Load outs ({unlinkedReceipts.length})</h3>
+        </CardContent>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Receipt</TableHead>
+              <TableHead className="text-right">Head</TableHead>
+              <TableHead>Tags</TableHead>
+              <TableHead>Protocol</TableHead>
+              <TableHead>Destination</TableHead>
+              <TableHead>Notes</TableHead>
+              {canWrite && <TableHead />}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {unlinkedReceipts.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={canWrite ? 7 : 6}>
+                  <Empty>No unlinked load outs. Click &quot;+ Load Out&quot; to log a delivery, or open an invoice to see its linked load outs.</Empty>
+                </TableCell>
+              </TableRow>
+            ) : (
+              unlinkedReceipts.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell>{formatDate(r.receipt_date)}</TableCell>
+                  <TableCell className="text-right">{formatNumber(r.head_count)}</TableCell>
+                  <TableCell>{r.tag_start && r.tag_end ? `${r.tag_start}-${r.tag_end}` : "—"}</TableCell>
+                  <TableCell>{r.protocol_name ?? "—"}</TableCell>
+                  <TableCell>
+                    {r.destinations.length === 0
+                      ? "—"
+                      : r.destinations.map((d, i) => (
+                          <div key={i}>
+                            {d.ranch_name ?? "?"} / {d.pasture_name ?? "?"} ({formatNumber(d.head_count)})
+                          </div>
+                        ))}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{r.notes ?? "—"}</TableCell>
+                  {canWrite && (
+                    <TableCell>
+                      <ReceiptCardActions
+                        receipt={r}
+                        lotId={lotId}
+                        lotNumber={lotNumber}
+                        fiscalYear={fiscalYear}
+                        activePastures={activePastures}
+                        protocols={protocols}
+                        invoices={purchases}
+                        canWrite={canWrite}
+                      />
+                    </TableCell>
+                  )}
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </Card>
+
       {purchases.length === 0 ? (
         <Empty>No purchase invoices on this lot yet.</Empty>
       ) : (
@@ -572,6 +650,7 @@ export function LotDetailTabs({
   medicationCatalog,
   receivingProtocols,
   defaultProtocolId,
+  unlinkedReceipts,
   canWrite,
   isOwner,
 }: {
@@ -591,6 +670,7 @@ export function LotDetailTabs({
   medicationCatalog: MedicationCatalogEntry[];
   receivingProtocols: ReceivingProtocol[];
   defaultProtocolId: string;
+  unlinkedReceipts: UnlinkedReceipt[];
   canWrite: boolean;
   isOwner: boolean;
 }) {
@@ -621,9 +701,12 @@ export function LotDetailTabs({
           lotId={lot.id}
           lotNumber={lot.lot_number}
           canWrite={canWrite}
+          fiscalYear={lot.fiscal_year}
+          activePastures={activePastures}
           protocols={receivingProtocols}
           defaultProtocolId={defaultProtocolId}
           purchases={purchases}
+          unlinkedReceipts={unlinkedReceipts}
         />
       )}
       {active === "health" && (

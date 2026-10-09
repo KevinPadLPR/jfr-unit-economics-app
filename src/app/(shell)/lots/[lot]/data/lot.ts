@@ -6,6 +6,7 @@ export interface LotRecord {
   closed_at: string | null;
   is_test: boolean | null;
   is_feed_pen: boolean | null;
+  fiscal_year: string | null;
 }
 
 export interface LotStatusRecord {
@@ -37,7 +38,7 @@ export async function getLotByNumber(lotNumber: string): Promise<LotRecord | nul
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("lots")
-    .select("id, lot_number, closed_at, is_test, is_feed_pen")
+    .select("id, lot_number, closed_at, is_test, is_feed_pen, fiscal_year")
     .eq("lot_number", lotNumber)
     .maybeSingle();
   if (error) throw error;

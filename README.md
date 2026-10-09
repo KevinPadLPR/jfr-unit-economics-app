@@ -1,42 +1,53 @@
-# JFR Ranch — Position Desk (vanilla JS)
+# JFR Ranch — Unit Economics dashboard (now a native tab, not a separate site)
 
-> **2026-10 rewrite notice:** this branch (`migration/dashboard-vanilla-js`) replaces
-> everything below with a plain HTML/CSS/JS build -- no build step, no React/Next.js,
-> no bundler -- so this dashboard matches the client's own vanilla-JS architecture
-> (`public/client-app/index.html`) and can eventually be folded into that single file.
-> The Next.js version this README originally documented still exists on `main`; the
-> sections below are kept for history/context (data model, brand notes) but the
-> **Quick start** section is stale -- see the summary just below instead.
+> **2026-10 integration notice:** this branch (`migration/dashboard-vanilla-js`) does NOT
+> build or deploy a separate site. An earlier pass on this branch did -- its own
+> `index.html` login page, its own Supabase session, its own Vercel project -- and that
+> was a scoping mistake, corrected this session. The dashboard is now **native vanilla-JS
+> code living inside `public/client-app/index.html`**, the client's own real app (a
+> reference copy in this repo; the actual deployed app is a separate repo the client owns
+> -- see below), behind the "Dashboard" nav tab that already existed there.
 >
-> **New architecture, in short:**
-> - One static `.html` file per report under `dashboard/`, plus `index.html` (login)
->   and `rancher.html` (crew view). "Dynamic routes" are a query string
->   (`dashboard/lot-detail.html?lot=37X-1`), not a path segment -- there's no server.
-> - This app's own code is plain ES modules under `assets/js/` (`pages/*.js` per
->   page, `data/*.js` mirroring the old `src/lib/data/*.ts` 1:1), loaded with
->   `<script type="module">` -- no bundler needed, browsers run this natively.
-> - Supabase JS and Chart.js load from the same CDN URLs/versions
->   `public/client-app/index.html` already uses (UMD builds, globals, no npm
->   install required to run the site).
-> - Every read in `assets/js/data/*.js` goes through `assets/js/supabase-client.js`,
->   which holds **only the anon/publishable key** plus a signed-in browser session,
->   relying entirely on this project's existing RLS policies (`current_user_role()`)
->   -- never the service_role key the old Next.js server code used. See that file's
->   header comment before adding any new data module.
-> - Run it: serve the repo root with any static file server (`npx serve .` or
->   `python -m http.server`) and open `index.html`. Sign in with a real Supabase Auth
->   account from the client's project -- same login every client-app user already has.
-> - Tests: `tests/dashboard.spec.js`, a read-only Playwright smoke suite -- `npm install`
->   then `npm test` (see that file's header comment and `tests/README.md` for the
->   `TEST_ACCOUNTANT_EMAIL`/`TEST_ACCOUNTANT_PASSWORD` env vars it needs).
-> - `package.json`/`package-lock.json` have been trimmed to just this branch's own
->   dev tooling (`@playwright/test`, `serve`) -- the leftover Next.js/React dependency
->   list a first pass of this rewrite left in place has been removed; the shipped site
->   itself still needs zero npm packages to run.
+> **Where everything lives:**
+> - `public/client-app/index.html` -- unchanged except: one new `<link>` for
+>   `dashboard/dashboard.css`, the `#dashboardView` markup (an iframe before, a plain
+>   `<div id="dashboardContent">` now), `showDashboardTab()` (calls
+>   `window.UEDash.renderSubtab(subtab)` instead of setting an iframe `src`), and ~20 new
+>   `<script src="dashboard/...">` tags right before `</body>`.
+> - `public/client-app/dashboard/` -- every ported file: `data/*.js` (9 files, 1:1 with the
+>   old Next.js `src/lib/data/*.ts`), `charts.js`, `colors.js`, `format.js`, `dom.js`,
+>   `pages/*.js` (7 sub-tab renderers), `router.js`, `dashboard.css`.
+> - **Plain classic `<script>` tags, not ES modules** -- this app's 40,000 lines are one
+>   shared global scope with no bundler, so the ported files read its already-declared
+>   `supabase`/`currentProfile`/`currentUser` directly instead of creating a second client
+>   or a second login. To avoid leaking ~70 function/const names into that shared scope,
+>   every ported name lives on one object, `window.UEDash`, instead of as a bare global --
+>   see `dashboard/format.js`'s header comment.
+> - **CSS is scoped**, not global -- every selector in `dashboard.css` (including what used
+>   to be a `:root` custom-property block) is written under a `.dashboard-root` ancestor,
+>   the one container the Dashboard tab's markup lives inside, because the host app already
+>   defines some of the same custom-property names (`--border`, `--radius`, `--accent`)
+>   with different values -- loading the old tokens.css unscoped would have silently
+>   changed those everywhere in the app, not just on this tab.
+> - **No `?lot=`/`?month=` query-string state** -- there's no URL to carry it in inside a
+>   tab. Lot/month selection lives in `window.UEDash.dashState` (`router.js`); a lot link
+>   anywhere in the dashboard calls `window.UEDash.goToLot(lotNumber)`, which jumps to the
+>   Lot Detail sub-tab with that lot already selected.
+> - Reads are exactly what they were: every `data/*.js` call is a plain `.select()`, no
+>   RPC, no write -- same posture as every phase of the separate Next.js migration this
+>   engagement has also been shipping on `migration/client-app-nextjs-phase1`.
+>
+> **What this branch is NOT**: it does not touch `johnfreagan/JFR-Ranch-cattle-management-
+> office-app-`, the client's real, separately-owned repo where the actually-deployed app
+> lives (confirmed this session -- `public/client-app/` here is a reference copy kept for
+> porting work, not the live site). Handing this off to the client is a separate step,
+> outside this repo, for Kevin to do however he and John agree on (PR, patch, etc.).
+>
+> The rest of this README (below) is the original Next.js-era document, kept for history
+> (data model notes, brand palette) -- it describes neither this branch's current shape
+> nor the separate Next.js migration on `main`.
 >
 > ---
->
-> ## (Below: original Next.js-era README, describing the SQLite dev workflow on `main` -- not this branch)
 
 Unit Economics, Lot Scorecard, and Market Position dashboard for JFR Ranch Co. Ltd
 (Kosse, TX). Built on the same approved visual style as the K4 Ranches reference

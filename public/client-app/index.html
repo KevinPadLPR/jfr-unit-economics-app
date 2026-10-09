@@ -1168,11 +1168,12 @@
             <button class="sub-tab" data-subtab="market-position">Market Position</button>
         </div>
 
-        <!-- Unit Economics dashboard view. The iframe's src is set in JS (showDashboardTab()),
-             never hardcoded here, so it only loads once the tab is actually opened. -->
-        <div id="dashboardView" class="hidden">
-            <iframe id="dashboardFrame" title="JFR Ranch Unit Economics Dashboard"
-                    style="width:100%; min-height: 80vh; border: 0; display: block;"></iframe>
+        <!-- Unit Economics dashboard view -- rendered natively by dashboard/router.js into
+             #dashboardContent (see showDashboardTab()), not an iframe onto a separately deployed
+             app. .dashboard-root scopes dashboard/dashboard.css so it can never affect any other
+             tab in this file. -->
+        <div id="dashboardView" class="hidden dashboard-root">
+            <div id="dashboardContent"></div>
         </div>
 
         <div id="lotsView">
@@ -6217,6 +6218,9 @@
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<!-- Unit Economics dashboard tab -- scoped stylesheet, see dashboard/dashboard.css's header
+     comment for why every selector in it is scoped under .dashboard-root. -->
+<link rel="stylesheet" href="dashboard/dashboard.css">
 <!-- Flatpickr — better date pickers (lets user type or use calendar; no iOS spinner) -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
 <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
@@ -10422,15 +10426,9 @@ window.addEventListener('unhandledrejection', function(e) {
     }
 
     // Unit Economics dashboard (Overview/Lots/Inventory/Cost of Gain/Lot Scorecard/Market
-    // Position) -- same-origin iframe onto the Next.js app at public/client-app's parent site,
-    // so these are plain relative routes, not a cross-origin embed. The iframe is only pointed
-    // at a route the first time its sub-tab is opened (dataset.loadedRoute guards re-navigating
-    // away from whatever the user clicked around to inside the iframe itself).
-    const DASHBOARD_ROUTES = {
-        overview: '/dashboard', inventory: '/dashboard/inventory', lots: '/dashboard/lots',
-        'lot-detail': '/dashboard/lot-detail', 'cost-of-gain': '/dashboard/cost-of-gain',
-        'lot-scorecard': '/dashboard/lot-scorecard', 'market-position': '/dashboard/market-position',
-    };
+    // Position) -- rendered natively into #dashboardContent by dashboard/router.js (see that
+    // file and dashboard/dom.js/charts.js/data/*.js/pages/*.js), not an iframe onto a separately
+    // deployed app. Every read in those files goes through this script's own `supabase` client.
     function showDashboardTab(subtab = 'overview') {
         hideAllViews();
         clearAllNavActive();
@@ -10440,12 +10438,7 @@ window.addEventListener('unhandledrejection', function(e) {
             b.classList.toggle('active', b.dataset.subtab === subtab);
         });
         $('dashboardView').classList.remove('hidden');
-        const route = DASHBOARD_ROUTES[subtab] || '/';
-        const frame = $('dashboardFrame');
-        if (frame.dataset.loadedRoute !== route) {
-            frame.src = route;
-            frame.dataset.loadedRoute = route;
-        }
+        window.UEDash.renderSubtab(subtab);
     }
 
     function showAnimalHealthTab(subtab = 'meds') {
@@ -39973,6 +39966,32 @@ ${ranchBlocks}
 
     checkSession();
 </script>
+
+<!-- Unit Economics dashboard tab -- plain classic scripts (not type="module"), loaded in
+     dependency order, after the main script above so they can read its already-declared
+     `supabase`/`currentProfile`/`currentUser` directly. See dashboard/router.js's header
+     comment and dashboard/format.js's header comment for why. -->
+<script src="dashboard/format.js"></script>
+<script src="dashboard/colors.js"></script>
+<script src="dashboard/dom.js"></script>
+<script src="dashboard/charts.js"></script>
+<script src="dashboard/data/gl.js"></script>
+<script src="dashboard/data/lot-attrs.js"></script>
+<script src="dashboard/data/cost-of-gain.js"></script>
+<script src="dashboard/data/market-position.js"></script>
+<script src="dashboard/data/scorecard.js"></script>
+<script src="dashboard/data/lot-flow.js"></script>
+<script src="dashboard/data/inventory.js"></script>
+<script src="dashboard/data/lot-sheet.js"></script>
+<script src="dashboard/data/overview.js"></script>
+<script src="dashboard/pages/overview.js"></script>
+<script src="dashboard/pages/inventory.js"></script>
+<script src="dashboard/pages/lots.js"></script>
+<script src="dashboard/pages/lot-detail.js"></script>
+<script src="dashboard/pages/cost-of-gain.js"></script>
+<script src="dashboard/pages/lot-scorecard.js"></script>
+<script src="dashboard/pages/market-position.js"></script>
+<script src="dashboard/router.js"></script>
 
 </body>
 </html>

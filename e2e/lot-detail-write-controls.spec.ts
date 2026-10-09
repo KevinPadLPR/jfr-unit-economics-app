@@ -1,11 +1,12 @@
 import { test, expect } from "@playwright/test";
 import { login, ACCOUNTANT, OFFICE } from "./helpers";
 
-// Phase 3/4/5/6's write controls (Record deaths / Write off missing / Stray returned / + Move /
-// Doctoring + New / Edit lot info / Duplicate lot / Close lot / invoice + New, Edit, Delete) are
-// never clicked by any Playwright spec -- this one only ever asserts visibility, same
-// no-mutation rule as every other spec in this suite (see playwright.config.ts). No spec may
-// ever rename, close, or duplicate a real production lot, or save/delete a real invoice.
+// Phase 3-8's write controls (Record deaths / Write off missing / Stray returned / + Move /
+// Doctoring + New / Edit lot info / Duplicate lot / Close lot / Invoice + New, Edit, Delete /
+// + Load Out / + Sale, Edit, Delete) are never clicked by any Playwright spec -- this one only
+// ever asserts visibility, same no-mutation rule as every other spec in this suite (see
+// playwright.config.ts). No spec may ever rename, close, or duplicate a real production lot, or
+// save/delete a real invoice, load-out, or sale.
 
 test("accountant sees Animal Health, Moves and Purchases read-only, with none of the new write controls", async ({ page }) => {
   await login(page, ACCOUNTANT);
@@ -31,6 +32,9 @@ test("accountant sees Animal Health, Moves and Purchases read-only, with none of
   await expect(page.getByRole("button", { name: "+ New" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "+ Load Out" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Edit" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Sales", exact: true }).click();
+  await expect(page.getByRole("button", { name: "+ Sale" })).toHaveCount(0);
 });
 
 test("office sees the new write controls on Animal Health, Moves and Purchases (never clicked)", async ({ page }) => {
@@ -55,4 +59,7 @@ test("office sees the new write controls on Animal Health, Moves and Purchases (
   await page.getByRole("button", { name: "Purchases", exact: true }).click();
   await expect(page.getByRole("button", { name: "+ New" })).toBeVisible();
   await expect(page.getByRole("button", { name: "+ Load Out" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Sales", exact: true }).click();
+  await expect(page.getByRole("button", { name: "+ Sale" })).toBeVisible();
 });

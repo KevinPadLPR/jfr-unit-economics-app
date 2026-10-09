@@ -126,3 +126,42 @@ export async function getDefaultProtocolId(lotId: string, protocols: ReceivingPr
   const receiving = protocols.filter((p) => p.protocol_type === "receiving");
   return receiving.length === 1 ? receiving[0].id : "";
 }
+
+export interface WithdrawalHold {
+  lot_number: string;
+  tag_number: string;
+  drug: string;
+  treat_date: string | null;
+  withdrawal_days: number | null;
+  clear_date: string | null;
+}
+
+/**
+ * Ported from loadWithdrawalHolds() (index.html:6612-6641), scoped to one lot/date instead of a
+ * batch of shipment lot/dates -- purely advisory (index.html:6644-6684's withdrawalConfirm never
+ * blocks a save, it only warns and lists). Only holds still open as of the given date are
+ * returned (`clear_date > asOfDate`).
+ */
+export async function getWithdrawalHolds(lotId: string, asOfDate: string): Promise<WithdrawalHold[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("withdrawal_holds")
+    .select("lot_number, tag_number, drug, treat_date, withdrawal_days, clear_date")
+    .eq("lot_id", lotId)
+    .gt("clear_date", asOfDate)
+    .order("tag_number", { ascending: true });
+  if (error) throw error;
+  return data ?? [];
+}
+
+/** Ported from the sale modal's buyer datalist (index.html:29913-29920). */
+export async function getPastBuyers(): Promise<string[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("sales").select("buyer").not("buyer", "is", null);
+  if (error) throw error;
+  const set = new Set<string>();
+  (data ?? []).forEach((s) => {
+    if (s.buyer) set.add(s.buyer);
+  });
+  return [...set].sort();
+}

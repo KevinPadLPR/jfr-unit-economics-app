@@ -164,7 +164,9 @@ function LotFormDialog({
   );
 }
 
-function CloseLotDialog({ lotNumber, lotId, closing, onClose }: { lotNumber: string; lotId: string; closing: boolean; onClose: () => void }) {
+/** Exported for reuse by sales-actions.tsx's post-save "this lot is now empty, close it?"
+ * offer (Phase 8) -- same dialog, not re-ported. */
+export function CloseLotDialog({ lotNumber, lotId, closing, onClose }: { lotNumber: string; lotId: string; closing: boolean; onClose: () => void }) {
   const [unweighed, setUnweighed] = useState<UnweighedSale[] | null>(null);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [isPending, startTransition] = useTransition();

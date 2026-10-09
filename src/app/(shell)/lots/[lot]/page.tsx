@@ -5,7 +5,7 @@ import { getDoctoringEvents, getDeathLog, getHeadAdjustments } from "./data/heal
 import { getMoveHistory, getLotTransfers } from "./data/moves";
 import { getSales } from "./data/sales";
 import { getAuditLog } from "./data/audit";
-import { getActivePastures, getFieldActions, getMedicationCatalog, getReceivingProtocols, getDefaultProtocolId } from "./data/reference";
+import { getActivePastures, getFieldActions, getMedicationCatalog, getReceivingProtocols, getDefaultProtocolId, getPastBuyers } from "./data/reference";
 import { getSession } from "@/lib/session";
 import { canWriteLotEntries } from "@/lib/roles";
 import { Badge } from "@/components/ui/badge";
@@ -47,6 +47,7 @@ export default async function LotDetailPage({ params }: { params: Promise<{ lot:
     editDetail,
     receivingProtocols,
     unlinkedReceipts,
+    pastBuyers,
   ] = await Promise.all([
     getSession(),
     getLotStatus(lot.id),
@@ -65,6 +66,7 @@ export default async function LotDetailPage({ params }: { params: Promise<{ lot:
     getLotEditDetail(lot.id),
     getReceivingProtocols(),
     getUnlinkedReceipts(lot.id),
+    getPastBuyers(),
   ]);
   const defaultProtocolId = await getDefaultProtocolId(lot.id, receivingProtocols);
   const role = session?.user.role;
@@ -100,6 +102,7 @@ export default async function LotDetailPage({ params }: { params: Promise<{ lot:
         receivingProtocols={receivingProtocols}
         defaultProtocolId={defaultProtocolId}
         unlinkedReceipts={unlinkedReceipts}
+        pastBuyers={pastBuyers}
         canWrite={canWrite}
         isOwner={isOwner}
       />

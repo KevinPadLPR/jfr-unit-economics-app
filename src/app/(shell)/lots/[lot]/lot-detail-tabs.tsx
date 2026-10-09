@@ -17,6 +17,7 @@ import { MoveActionButton } from "./moves-actions";
 import { DoctoringActionButton } from "./doctoring-actions";
 import { NewInvoiceButton, InvoiceCardActions } from "./purchases-actions";
 import { NewLoadOutButton, ReceiptCardActions } from "./load-out-actions";
+import { NewSaleButton, SaleCardActions } from "./sales-actions";
 import { DeleteEventButton } from "./delete-event-button";
 import { deleteDeath, deleteHeadAdjustment } from "./actions/health";
 import { deleteMove } from "./actions/moves";
@@ -555,49 +556,81 @@ function Moves({
   );
 }
 
-function Sales({ sales }: { sales: Sale[] }) {
-  if (sales.length === 0) return <Empty>No sales yet.</Empty>;
+function Sales({
+  lotId,
+  lotNumber,
+  canWrite,
+  isOwner,
+  activePastures,
+  pastBuyers,
+  sales,
+}: {
+  lotId: string;
+  lotNumber: string;
+  canWrite: boolean;
+  isOwner: boolean;
+  activePastures: ActivePasture[];
+  pastBuyers: string[];
+  sales: Sale[];
+}) {
   return (
-    <Card>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Date</TableHead>
-            <TableHead>Buyer</TableHead>
-            <TableHead className="text-right">Head</TableHead>
-            <TableHead className="text-right">Weight</TableHead>
-            <TableHead className="text-right">$/cwt</TableHead>
-            <TableHead className="text-right">Total</TableHead>
-            <TableHead>Source</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {sales.map((s) => {
-            const wt = s.net_weight_lb ?? s.gross_weight_lb;
-            const total = s.total_price ?? (s.price_per_head != null && s.head_count != null ? s.price_per_head * s.head_count : null);
-            return (
-              <TableRow key={s.id}>
-                <TableCell>{formatDate(s.sale_date)}</TableCell>
-                <TableCell>{s.buyer ?? "—"}</TableCell>
-                <TableCell className="text-right">{formatNumber(s.head_count)}</TableCell>
-                <TableCell className="text-right">{wt != null ? `${formatNumber(wt)} lb` : "—"}</TableCell>
-                <TableCell className="text-right">{s.price_per_cwt != null ? `$${s.price_per_cwt.toFixed(2)}` : "—"}</TableCell>
-                <TableCell className="text-right">{formatMoney(total)}</TableCell>
-                <TableCell>
-                  {s.sources.length === 0
-                    ? "—"
-                    : s.sources.map((src, i) => (
-                        <div key={i}>
-                          {src.ranch_name ?? "?"} / {src.pasture_name ?? "?"} ({formatNumber(src.head_count)})
-                        </div>
-                      ))}
-                </TableCell>
+    <div className="flex flex-col gap-4">
+      {canWrite && (
+        <div>
+          <NewSaleButton lotId={lotId} lotNumber={lotNumber} activePastures={activePastures} pastBuyers={pastBuyers} />
+        </div>
+      )}
+      {sales.length === 0 ? (
+        <Empty>No sales yet.</Empty>
+      ) : (
+        <Card>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Date</TableHead>
+                <TableHead>Buyer</TableHead>
+                <TableHead className="text-right">Head</TableHead>
+                <TableHead className="text-right">Weight</TableHead>
+                <TableHead className="text-right">$/cwt</TableHead>
+                <TableHead className="text-right">Total</TableHead>
+                <TableHead>Source</TableHead>
+                {canWrite && <TableHead />}
               </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
-    </Card>
+            </TableHeader>
+            <TableBody>
+              {sales.map((s) => {
+                const wt = s.net_weight_lb ?? s.gross_weight_lb;
+                const total = s.total_price ?? (s.price_per_head != null && s.head_count != null ? s.price_per_head * s.head_count : null);
+                return (
+                  <TableRow key={s.id}>
+                    <TableCell>{formatDate(s.sale_date)}</TableCell>
+                    <TableCell>{s.buyer ?? "—"}</TableCell>
+                    <TableCell className="text-right">{formatNumber(s.head_count)}</TableCell>
+                    <TableCell className="text-right">{wt != null ? `${formatNumber(wt)} lb` : "—"}</TableCell>
+                    <TableCell className="text-right">{s.price_per_cwt != null ? `$${s.price_per_cwt.toFixed(2)}` : "—"}</TableCell>
+                    <TableCell className="text-right">{formatMoney(total)}</TableCell>
+                    <TableCell>
+                      {s.sources.length === 0
+                        ? "—"
+                        : s.sources.map((src, i) => (
+                            <div key={i}>
+                              {src.ranch_name ?? "?"} / {src.pasture_name ?? "?"} ({formatNumber(src.head_count)})
+                            </div>
+                          ))}
+                    </TableCell>
+                    {canWrite && (
+                      <TableCell>
+                        <SaleCardActions sale={s} lotId={lotId} lotNumber={lotNumber} activePastures={activePastures} pastBuyers={pastBuyers} canWrite={canWrite} isOwner={isOwner} />
+                      </TableCell>
+                    )}
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </Card>
+      )}
+    </div>
   );
 }
 
@@ -651,6 +684,7 @@ export function LotDetailTabs({
   receivingProtocols,
   defaultProtocolId,
   unlinkedReceipts,
+  pastBuyers,
   canWrite,
   isOwner,
 }: {
@@ -671,6 +705,7 @@ export function LotDetailTabs({
   receivingProtocols: ReceivingProtocol[];
   defaultProtocolId: string;
   unlinkedReceipts: UnlinkedReceipt[];
+  pastBuyers: string[];
   canWrite: boolean;
   isOwner: boolean;
 }) {
@@ -739,7 +774,17 @@ export function LotDetailTabs({
           transfers={transfers}
         />
       )}
-      {active === "sales" && <Sales sales={sales} />}
+      {active === "sales" && (
+        <Sales
+          lotId={lot.id}
+          lotNumber={lot.lot_number}
+          canWrite={canWrite}
+          isOwner={isOwner}
+          activePastures={activePastures}
+          pastBuyers={pastBuyers}
+          sales={sales}
+        />
+      )}
       {active === "closeout" && <NotYetMigrated label="Closeout" />}
       {active === "feedpen" && <NotYetMigrated label="Feed pen" />}
       {active === "audit" && <AuditLog events={audit} />}

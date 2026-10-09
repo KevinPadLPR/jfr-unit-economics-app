@@ -9,12 +9,16 @@ export interface Sale {
   id: string;
   sale_date: string | null;
   buyer: string | null;
+  sale_invoice_number: string | null;
   head_count: number | null;
   gross_weight_lb: number | null;
   net_weight_lb: number | null;
   price_per_cwt: number | null;
   price_per_head: number | null;
   total_price: number | null;
+  tag_start: number | null;
+  tag_end: number | null;
+  missing_tags: number[] | null;
   notes: string | null;
   sources: SaleSource[];
 }
@@ -27,12 +31,16 @@ interface RawSale {
   id: string;
   sale_date: string | null;
   buyer: string | null;
+  sale_invoice_number: string | null;
   head_count: number | null;
   gross_weight_lb: number | null;
   net_weight_lb: number | null;
   price_per_cwt: number | null;
   price_per_head: number | null;
   total_price: number | null;
+  tag_start: number | null;
+  tag_end: number | null;
+  missing_tags: number[] | null;
   notes: string | null;
   sale_sources: RawSource[] | null;
 }
@@ -43,8 +51,8 @@ export async function getSales(lotId: string): Promise<Sale[]> {
   const { data, error } = await supabase
     .from("sales")
     .select(
-      "id, sale_date, buyer, head_count, gross_weight_lb, net_weight_lb, price_per_cwt, price_per_head, " +
-        "total_price, notes, sale_sources(head_count, pastures(name, ranches(name)))"
+      "id, sale_date, buyer, sale_invoice_number, head_count, gross_weight_lb, net_weight_lb, price_per_cwt, price_per_head, " +
+        "total_price, tag_start, tag_end, missing_tags, notes, sale_sources(head_count, pastures(name, ranches(name)))"
     )
     .eq("lot_id", lotId)
     .order("sale_date", { ascending: true });
@@ -54,12 +62,16 @@ export async function getSales(lotId: string): Promise<Sale[]> {
     id: s.id,
     sale_date: s.sale_date,
     buyer: s.buyer,
+    sale_invoice_number: s.sale_invoice_number,
     head_count: s.head_count,
     gross_weight_lb: s.gross_weight_lb,
     net_weight_lb: s.net_weight_lb,
     price_per_cwt: s.price_per_cwt,
     price_per_head: s.price_per_head,
     total_price: s.total_price,
+    tag_start: s.tag_start,
+    tag_end: s.tag_end,
+    missing_tags: s.missing_tags,
     notes: s.notes,
     sources: (s.sale_sources ?? []).map((src) => ({
       head_count: src.head_count,

@@ -68,7 +68,7 @@ window.UEDash = window.UEDash || {};
             callbacks: {
               label: (ctx) => {
                 const row = rows[ctx.dataIndex];
-                return `Unrealized: ${formatMoney(ctx.parsed.y)}${row.lightCalfCaveat ? " (light-calf mark — see note)" : ""}`;
+                return `Unrealized: ${formatMoney(ctx.parsed.y)}${row.lightCalfCaveat ? " (light-calf mark, see note)" : ""}`;
               },
             },
           },

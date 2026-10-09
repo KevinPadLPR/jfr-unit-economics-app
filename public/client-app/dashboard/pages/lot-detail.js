@@ -70,11 +70,11 @@ window.UEDash = window.UEDash || {};
       <tr>
         <td>${formatDate(row.date)}</td>
         <td>${row.category === "movement" ? badgeHtml(row.type, MOVEMENT_BADGE[row.type] ?? "neutral") : badgeHtml(row.type, "outline")}</td>
-        <td class="text-right">${row.head != null ? formatNumber(row.head) : "—"}</td>
-        <td class="text-right">${row.weight ? `${formatNumber(row.weight)} lb` : "—"}</td>
+        <td class="text-right">${row.head != null ? formatNumber(row.head) : "-"}</td>
+        <td class="text-right">${row.weight ? `${formatNumber(row.weight)} lb` : "-"}</td>
         <td class="text-right">${formatMoney(row.amount)}</td>
-        <td class="text-right">${row.dollarsPerHead != null ? formatMoney(row.dollarsPerHead, { cents: true }) : "—"}</td>
-        <td class="truncate" style="max-width:20rem" title="${escapeHtml(row.notes ?? "")}">${row.notes ? escapeHtml(row.notes) : "—"}</td>
+        <td class="text-right">${row.dollarsPerHead != null ? formatMoney(row.dollarsPerHead, { cents: true }) : "-"}</td>
+        <td class="truncate" style="max-width:20rem" title="${escapeHtml(row.notes ?? "")}">${row.notes ? escapeHtml(row.notes) : "-"}</td>
       </tr>`;
 
     const expenseRow = (line) => `
@@ -161,7 +161,7 @@ window.UEDash = window.UEDash || {};
 
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
           ${statTileHtml({ label: "Total Outstanding Cost", value: formatMoney(sheet.outstandingCost), provenance: "measured" })}
-          ${statTileHtml({ label: "Market Value (on hand)", value: sheet.markedValueOnHand !== null ? formatMoney(sheet.markedValueOnHand) : "—", provenance: "modeled", delta: sheet.markedValueOnHand === null ? "Lot is closed or has no head on hand" : undefined })}
+          ${statTileHtml({ label: "Market Value (on hand)", value: sheet.markedValueOnHand !== null ? formatMoney(sheet.markedValueOnHand) : "-", provenance: "modeled", delta: sheet.markedValueOnHand === null ? "Lot is closed or has no head on hand" : undefined })}
           ${statTileHtml({ label: "Estimated P/L", value: formatMoney(sheet.estimatedPL), deltaTone: sheet.estimatedPL >= 0 ? "good" : "bad", provenance: "modeled" })}
         </div>
       </div>`;

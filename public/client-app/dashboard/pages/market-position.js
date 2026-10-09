@@ -32,7 +32,7 @@ window.UEDash = window.UEDash || {};
         <div class="card" style="${rows.length ? "" : "display:none"}">
           <div class="card-header"><h3 class="card-title card-title-base">Unrealized position by open lot</h3><p class="card-description">What each open lot would gain or lose if sold today, at the latest market price.</p></div>
           <div class="chart-box h-72"><canvas id="unrealized-chart"></canvas></div>
-          ${rows.some((r) => r.lightCalfCaveat) ? `<p class="light-calf-note">Lots under 600 lb are marked at a price meant for heavier cattle, which can show an overly large loss — look at those numbers as a rough estimate, not a firm one.</p>` : ""}
+          ${rows.some((r) => r.lightCalfCaveat) ? `<p class="light-calf-note">Lots under 600 lb are marked at a price meant for heavier cattle, which can show an overly large loss. Look at those numbers as a rough estimate, not a firm one.</p>` : ""}
         </div>
 
         <div class="card" style="overflow:hidden">
@@ -72,7 +72,7 @@ window.UEDash = window.UEDash || {};
           </div>
         </div>
 
-        <p class="text-xs text-muted-foreground">Every lot is marked at the same feeder-cattle price, which may not perfectly reflect lighter calves' real market value — that's what the "light-calf mark" flag is calling out.</p>
+        <p class="text-xs text-muted-foreground">Every lot is marked at the same feeder-cattle price, which may not perfectly reflect lighter calves' real market value. That's what the "light-calf mark" flag is calling out.</p>
       </div>`;
 
     if (rows.length) {

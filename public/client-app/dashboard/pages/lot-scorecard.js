@@ -36,9 +36,9 @@ window.UEDash = window.UEDash || {};
               (r) => `
             <tr>
               <td class="font-medium">${lotLinkHtml(r.lot)}</td>
-              <td>${r.status ? escapeHtml(r.status) : "—"}</td>
-              <td>${r.feedType ? escapeHtml(r.feedType) : "—"}</td>
-              <td>${r.locationType ? escapeHtml(r.locationType) : "—"}</td>
+              <td>${r.status ? escapeHtml(r.status) : "-"}</td>
+              <td>${r.feedType ? escapeHtml(r.feedType) : "-"}</td>
+              <td>${r.locationType ? escapeHtml(r.locationType) : "-"}</td>
               <td class="text-right">${formatNumber(r.headIn)}</td>
               <td class="text-right">${formatNumber(r.headOnHand)}</td>
               <td class="text-right">${formatNumber(r.avgDof)}</td>
@@ -74,7 +74,7 @@ window.UEDash = window.UEDash || {};
           <div id="location-filter"></div>
         </div>
         <div class="card" id="cog-chart-card">
-          <div class="card-header"><h3 class="card-title card-title-base">Cost of gain, all-in — by lot</h3><p class="card-description">Highest cost per pound first, so you can spot which lots are expensive to run.</p></div>
+          <div class="card-header"><h3 class="card-title card-title-base">Cost of gain, all-in, by lot</h3><p class="card-description">Highest cost per pound first, so you can spot which lots are expensive to run.</p></div>
           <div class="chart-box h-80"><canvas id="cog-chart"></canvas></div>
         </div>
         <div class="card" style="overflow:hidden">

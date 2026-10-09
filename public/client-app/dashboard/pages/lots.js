@@ -50,8 +50,8 @@ window.UEDash = window.UEDash || {};
             <tr>
               <td class="font-medium">${lotLinkHtml(l.lot)}</td>
               <td>${statusBadge(l.status)}</td>
-              <td>${l.feed_type ? escapeHtml(l.feed_type) : "—"}</td>
-              <td>${l.location_type ? escapeHtml(l.location_type) : "—"}</td>
+              <td>${l.feed_type ? escapeHtml(l.feed_type) : "-"}</td>
+              <td>${l.location_type ? escapeHtml(l.location_type) : "-"}</td>
               <td class="text-right">${formatNumber(l.head_on_hand)}</td>
               <td>${formatDate(l.last_activity)}</td>
             </tr>`

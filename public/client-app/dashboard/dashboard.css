@@ -9,6 +9,18 @@
  * dashboard uses; without scoping, loading this file would silently change
  * those everywhere, not just on this tab.
  */
+
+/* The host app's own global `main { max-width: 1100px; margin: 0 auto; }` (index.html's main
+   stylesheet) centers every tab's content in a fairly narrow column -- too narrow for this
+   dashboard's grids/tables once they have real width to work with. :has() overrides it only
+   for the <main> that currently contains .dashboard-root, so every other tab keeps the host's
+   own layout untouched. 1800px (not "none") keeps rows of cards/tables from stretching
+   absurdly wide on an ultrawide monitor while still using most of a normal screen. */
+main:has(.dashboard-root) {
+  max-width: 1800px;
+  padding: 24px 32px;
+}
+
 .dashboard-root {
   --background: #f5f5f0;
   --foreground: #2c2c2a;
@@ -140,6 +152,12 @@
   .dashboard-root .lg\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dashboard-root .lg\:grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .dashboard-root .lg\:grid-cols-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+/* Extra tier for the wider container above (main:has(.dashboard-root)) -- without it, a grid
+   capped at lg:grid-cols-4 just stretches each tile wider on a big screen instead of showing
+   more per row. */
+@media (min-width: 1280px) {
+  .dashboard-root .xl\:grid-cols-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 }
 
 /* ---- buttons ---- */

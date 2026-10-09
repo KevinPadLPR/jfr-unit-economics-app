@@ -71,11 +71,11 @@ window.UEDash = window.UEDash || {};
 
     body.innerHTML = `
       <div class="stack">
-        ${!cog.grazingSummerNativeBooked ? reportUnavailableHtml(`Summer grazing costs for lot ${cog.lot} haven't been booked yet — feed cost of gain is understated until they are.`) : ""}
+        ${!cog.grazingSummerNativeBooked ? reportUnavailableHtml(`Summer grazing costs for lot ${cog.lot} haven't been booked yet. Feed cost of gain is understated until they are.`) : ""}
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          ${statTileHtml({ label: "Cost of Gain — Feed only", value: formatPerLb(cog.cogFeed), provenance: "modeled", delta: formatMoney(cog.feedForage) + " total" })}
-          ${statTileHtml({ label: "Cost of Gain — Operating", value: formatPerLb(cog.cogOper), provenance: "modeled", delta: formatMoney(cog.operating) + " total" })}
-          ${statTileHtml({ label: "Cost of Gain — All-in", value: formatPerLb(cog.cogAllIn), provenance: "modeled", delta: formatMoney(cog.allIn) + " total" })}
+          ${statTileHtml({ label: "Cost of Gain: Feed only", value: formatPerLb(cog.cogFeed), provenance: "modeled", delta: formatMoney(cog.feedForage) + " total" })}
+          ${statTileHtml({ label: "Cost of Gain: Operating", value: formatPerLb(cog.cogOper), provenance: "modeled", delta: formatMoney(cog.operating) + " total" })}
+          ${statTileHtml({ label: "Cost of Gain: All-in", value: formatPerLb(cog.cogAllIn), provenance: "modeled", delta: formatMoney(cog.allIn) + " total" })}
         </div>
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
           ${statTileHtml({ label: "Head-days", value: formatNumber(cog.headDays), provenance: "measured" })}
@@ -89,7 +89,7 @@ window.UEDash = window.UEDash || {};
             <div class="chart-box h-72"><canvas id="cost-breakdown-chart"></canvas></div>
           </div>
           <div class="card" style="${targetAdg === null ? "display:none" : ""}">
-            <div class="card-header"><h3 class="card-title card-title-base">Target vs. actual daily gain</h3><p class="card-description">How this lot's cattle are gaining weight against what was assumed going in — a snapshot, not a trend, since a lot only gets one realized ADG reading at a time.</p></div>
+            <div class="card-header"><h3 class="card-title card-title-base">Target vs. actual daily gain</h3><p class="card-description">How this lot's cattle are gaining weight against what was assumed going in. A snapshot, not a trend, since a lot only gets one realized ADG reading at a time.</p></div>
             <div class="chart-box h-48"><canvas id="adg-chart"></canvas></div>
           </div>
         </div>

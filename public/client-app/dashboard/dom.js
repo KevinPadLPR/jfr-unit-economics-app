@@ -33,8 +33,8 @@ window.UEDash = window.UEDash || {};
   const PROV_TITLE = {
     measured: "Scale ticket, invoice, or GL posting",
     sourced: "CME settle or cash bid",
-    modeled: "Derived — e.g. weight from ADG, cost from head-days",
-    assumed: "Projected — e.g. flat ADG, assumed death-loss %",
+    modeled: "Derived, e.g. weight from ADG, cost from head-days",
+    assumed: "Projected, e.g. flat ADG, assumed death-loss %",
   };
 
   /** Position Desk spec Rule 1: every number carries a provenance label. */
@@ -52,7 +52,7 @@ window.UEDash = window.UEDash || {};
             <p class="card-description">${escapeHtml(label)}</p>
             ${provenanceBadgeHtml(provenance)}
           </div>
-          <p class="stat-value">${escapeHtml(value ?? "—")}</p>
+          <p class="stat-value">${escapeHtml(value ?? "-")}</p>
           ${delta ? `<span class="stat-delta stat-delta-${deltaTone}">${escapeHtml(delta)}</span>` : ""}
         </div>
       </div>`;

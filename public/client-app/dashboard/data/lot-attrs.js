@@ -21,7 +21,7 @@ window.UEDash = window.UEDash || {};
         hasAppData: false,
         adgUsed: fallbackTargetAdg,
         adgProvenance: "assumed",
-        adgSourceDetail: "Using our target daily gain for this lot — no field weigh-ins yet",
+        adgSourceDetail: "Using our target daily gain for this lot, no field weigh-ins yet",
         projectedCurrentWeight: null,
         anyWeightStale: false,
       };
@@ -32,7 +32,7 @@ window.UEDash = window.UEDash || {};
       realized: "Based on actual field weigh-ins",
       realized_thin: "Based on actual field weigh-ins (small sample so far)",
       mixed: "Mix of actual weigh-ins and our target assumption",
-      assumed: "Using our target daily gain for now — no weigh-ins yet",
+      assumed: "Using our target daily gain for now, no weigh-ins yet",
     };
 
     return {

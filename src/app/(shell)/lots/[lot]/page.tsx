@@ -6,6 +6,8 @@ import { getMoveHistory, getLotTransfers } from "./data/moves";
 import { getSales } from "./data/sales";
 import { getAuditLog } from "./data/audit";
 import { getActivePastures, getFieldActions, getMedicationCatalog, getReceivingProtocols, getDefaultProtocolId, getPastBuyers } from "./data/reference";
+import { getCloseoutInputs } from "./data/closeout";
+import { closeoutActual, closeoutProjection, ranchTodayIso } from "./closeout-math";
 import { getSession } from "@/lib/session";
 import { canWriteLotEntries } from "@/lib/roles";
 import { Badge } from "@/components/ui/badge";
@@ -73,6 +75,17 @@ export default async function LotDetailPage({ params }: { params: Promise<{ lot:
   const canWrite = role ? canWriteLotEntries(role) : false;
   const isOwner = role === "owner";
 
+  // Closeout (Phase 9, read-only): mirrors the vanilla app's own gate (index.html:9216-9220) --
+  // no invoice yet means nothing to project.
+  let closeout = null;
+  if (status && status.head_in) {
+    const today = ranchTodayIso();
+    const { inputs, rates } = await getCloseoutInputs(lot.id, status, editDetail?.arrival_date ?? null, today);
+    const actual = closeoutActual(inputs, rates);
+    const proj = closeoutProjection(inputs, rates, actual);
+    closeout = { actual, proj, rates };
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -105,6 +118,7 @@ export default async function LotDetailPage({ params }: { params: Promise<{ lot:
         pastBuyers={pastBuyers}
         canWrite={canWrite}
         isOwner={isOwner}
+        closeout={closeout}
       />
     </div>
   );

@@ -21,6 +21,12 @@ export interface LotStatusRecord {
   sex_class: string | null;
   adg_used: number | null;
   adg_source: string | null;
+  /** The rest are Closeout-only (Phase 9): closeoutActual() reads these off `st`. */
+  head_in: number | null;
+  head_dead: number | null;
+  total_cost_in: number | null;
+  total_weight_in: number | null;
+  weighted_arrival_date: string | null;
 }
 
 export interface CurrentLocation {
@@ -50,12 +56,13 @@ export async function getLotStatus(lotId: string): Promise<LotStatusRecord | nul
   const { data, error } = await supabase
     .from("lot_status")
     .select(
-      "lot_id, lot_number, closed_at, head_current, avg_weight_in, projected_current_weight, days_on_feed, source, sex_class, adg_used, adg_source"
+      "lot_id, lot_number, closed_at, head_current, avg_weight_in, projected_current_weight, days_on_feed, source, sex_class, adg_used, adg_source, " +
+        "head_in, head_dead, total_cost_in, total_weight_in, weighted_arrival_date"
     )
     .eq("lot_id", lotId)
     .maybeSingle();
   if (error) throw error;
-  return data;
+  return data as unknown as LotStatusRecord | null;
 }
 
 export interface LotEditDetail {
@@ -79,6 +86,44 @@ export async function getLotEditDetail(lotId: string): Promise<LotEditDetail | n
     .maybeSingle();
   if (error) throw error;
   return data;
+}
+
+export interface LotCloseoutAssumptions {
+  target_sale_cwt: number | null;
+  target_days_on_feed: number | null;
+  target_adg: number | null;
+  target_ship_date: string | null;
+  cog_mode: string | null;
+  labor_mode: string | null;
+  assumed_cog_per_lb: number | null;
+  assumed_nonfeed_cog_per_day: number | null;
+  assumed_labor_per_day: number | null;
+  assumed_labor_per_head: number | null;
+  assumed_processing_per_head: number | null;
+  assumed_doctoring_per_head: number | null;
+  assumed_death_loss_pct: number | null;
+  assumed_interest_pct: number | null;
+}
+
+/**
+ * The lot's saved cost-of-gain assumptions -- what `closeoutRates()` (index.html:8499-8522)
+ * prefills its live input boxes from. This phase is read-only (no input boxes), so `rates` is
+ * built directly from these saved columns rather than from any unsaved what-if the office might
+ * be typing on the real Closeout tab.
+ */
+export async function getLotCloseoutAssumptions(lotId: string): Promise<LotCloseoutAssumptions | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("lots")
+    .select(
+      "target_sale_cwt, target_days_on_feed, target_adg, target_ship_date, cog_mode, labor_mode, " +
+        "assumed_cog_per_lb, assumed_nonfeed_cog_per_day, assumed_labor_per_day, assumed_labor_per_head, " +
+        "assumed_processing_per_head, assumed_doctoring_per_head, assumed_death_loss_pct, assumed_interest_pct"
+    )
+    .eq("id", lotId)
+    .maybeSingle();
+  if (error) throw error;
+  return data as unknown as LotCloseoutAssumptions | null;
 }
 
 /**

@@ -28,8 +28,11 @@ test("Lot detail page renders every read-only section for a real lot", async ({ 
     expect(hasTable + hasEmptyState).toBeGreaterThan(0);
   }
 
-  // Closeout and Feed pen stay deferred past Phase 3 too (see its plan) -- confirm the
-  // placeholder, not a write form, is what's behind them.
+  // Closeout (Phase 9): a lot with at least one invoice renders the read-only Actual/Projection
+  // table; one with none renders the same gate the vanilla app shows. Either is a pass -- the
+  // real herd determines which lot this spec lands on, so both states are legitimate.
   await page.getByRole("button", { name: "Closeout", exact: true }).click();
-  await expect(page.getByText("isn't migrated yet")).toBeVisible();
+  const hasCloseoutTable = await page.getByRole("cell", { name: "Total cost" }).count();
+  const hasNoInvoiceGate = await page.getByText("Add at least one invoice").count();
+  expect(hasCloseoutTable + hasNoInvoiceGate).toBeGreaterThan(0);
 });

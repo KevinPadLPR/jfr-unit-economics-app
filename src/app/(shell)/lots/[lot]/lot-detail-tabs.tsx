@@ -11,6 +11,7 @@ import type { DoctoringEvent, DeathEvent, HeadAdjustment } from "./data/health";
 import type { MoveEvent, LotTransfer } from "./data/moves";
 import type { Sale } from "./data/sales";
 import type { AuditEvent } from "./data/audit";
+import type { CloseoutActual, CloseoutProjection, CloseoutRates } from "./closeout-math";
 import type { ActivePasture, FieldAction, MedicationCatalogEntry, ReceivingProtocol } from "./data/reference";
 import { HealthActionButtons } from "./health-actions";
 import { MoveActionButton } from "./moves-actions";
@@ -634,6 +635,114 @@ function Sales({
   );
 }
 
+function money4(n: number | null | undefined): string {
+  if (n == null || Number.isNaN(n)) return "—";
+  return `$${n.toFixed(4)}`;
+}
+
+/**
+ * Read-only Actual + Projection table, ported from the row set of recalculate()
+ * (index.html:9561-9654). No Budget column, no per-head toggle, no sold/left split and no input
+ * boxes -- this phase has none of those; see the approved Phase 9 plan for why. Actual is the
+ * lot's cost to date; Projection is the lot's cost at close (Actual's own figures plus the
+ * forward slice), the same pairing the live calculator shows side by side.
+ */
+function Closeout({ closeout }: { closeout: { actual: CloseoutActual; proj: CloseoutProjection; rates: CloseoutRates } | null }) {
+  if (!closeout) return <Empty>Add at least one invoice to enable closeout projections.</Empty>;
+  const { actual: a, proj: p, rates } = closeout;
+
+  const row = (label: string, actual: number | null, projection: number | null, note?: string, fmt: (n: number | null) => string = formatMoney) => (
+    <TableRow key={label}>
+      <TableCell>
+        {label}
+        {note ? <span className="ml-2 text-xs text-muted-foreground">{note}</span> : null}
+      </TableCell>
+      <TableCell className="text-right">{fmt(actual)}</TableCell>
+      <TableCell className="text-right">{fmt(projection)}</TableCell>
+    </TableRow>
+  );
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Card>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead />
+              <TableHead className="text-right">Actual (to date)</TableHead>
+              <TableHead className="text-right">Projection (at close)</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {row("Head-days", a.headDays, a.headDays + p.forwardHeadDays, undefined, (n) => formatNumber(n != null ? Math.round(n) : null))}
+            {row("Days on feed", a.daysToDate, p.remainingDays != null ? a.daysToDate + p.remainingDays : null, undefined, (n) => formatNumber(n))}
+            {row("Cattle in", a.cattleLive, a.cattleLive - p.deathLossFwd, `${formatNumber(a.headIn)} in at ${formatMoney(a.avgCostIn)}/hd`)}
+            {row(
+              "Death loss",
+              a.deathLossUsd,
+              a.deathLossUsd + p.deathLossFwd,
+              `${formatNumber(a.headDead)} dead so far${p.deathsToCome > 0 ? ` · ${formatNumber(Math.round(p.deathsToCome))} more assumed` : ""}`
+            )}
+            {a.netMissing !== 0 &&
+              row(
+                a.netMissing > 0 ? "Missing" : "Strays back",
+                a.missingLossUsd,
+                a.missingLossUsd,
+                a.netMissing > 0 ? `${formatNumber(a.missingOut)} written off at cost in` : `${formatNumber(a.strayIn)} back, credited at cost in`
+              )}
+            {a.transferInHead > 0 && row("Transferred in", a.transferInUsd, a.transferInUsd, `${formatNumber(a.transferInHead)} hd at the giving lot's cost`)}
+            {a.transferOutHead > 0 && row("Transferred out", -a.transferOutUsd, -a.transferOutUsd, `${formatNumber(a.transferOutHead)} hd moved to another lot`)}
+            {row("Medicine", a.medicine, a.medicine + p.medicineFwd, "processing + doctoring" + (a.otherMed > 0 ? " + other" : ""))}
+            {a.feedInsideCog
+              ? a.feedLedger > 0 && row("Feed (memo)", a.feedLedger, null, "inside cost of gain — not added")
+              : (a.feed > 0 || p.feedFwd > 0) && row("Feed", a.feed, a.feed + p.feedFwd)}
+            {row(
+              "Cost of gain",
+              a.cog,
+              a.cog + p.cogFwd,
+              a.nonFeedMissing
+                ? "no non-feed rate set"
+                : a.boundaryActive && a.hdBefore > 0
+                  ? "split at the feed-direct boundary · non-feed after"
+                  : a.cogSplit
+                    ? "non-feed only"
+                    : `$${(rates.cog ?? 0).toFixed(4)}/lb of gain`
+            )}
+            {row("Labor", a.labor, a.labor + p.laborFwd)}
+            {row("Interest", a.interest + a.transferInterest, a.interest + a.transferInterest + p.interestFwd)}
+            {row("Total cost", a.totalCost, p.totalCost)}
+            {row("Revenue", a.revenue, p.totalRevenue)}
+            {row("Net", null, p.net, undefined, (n) => formatMoney(n))}
+            {row("Break-even $/lb", null, p.breakEvenPerLb, "at the projected finish weight", money4)}
+          </TableBody>
+        </Table>
+      </Card>
+      <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+        <p>
+          Finish weight here is weight-in plus target days × target ADG, not the live calculator&apos;s anchored
+          weight projection (unavailable in this read-only view) — Break-even $/lb can run higher or lower than the
+          live Closeout screen for a lot without a whole-lot weighing on file. Every other figure on this table ties
+          out exactly.
+        </p>
+        <p>
+          Gain to date is priced at{" "}
+          {a.estAdgSource === "realized"
+            ? `the realized ADG on the ${formatNumber(a.soldWithWt)} head shipped with a pay weight`
+            : a.estAdgSource === "weighing"
+              ? "the newest whole-lot weighing"
+              : "the target ADG (no realized weights or whole-lot weighing yet)"}
+          , {a.estAdg.toFixed(2)} lb/day on the {formatNumber(Math.round(a.unsettledHeadDays))} head-days not yet weighed out.
+          {a.gainClamped ? " Realized gain on the head already shipped came back negative and is charged as zero, never as a credit." : ""}
+        </p>
+        {a.unweighedSoldHead > 0 && (
+          <p>{formatNumber(a.unweighedSoldHead)} head sold with no pay weight — their gain is still an estimate at the assumed ADG.</p>
+        )}
+        {p.doctoringOnFloor && <p>Doctoring projection is held at the assumed floor until actual plus observed burn passes it.</p>}
+      </div>
+    </div>
+  );
+}
+
 function AuditLog({ events }: { events: AuditEvent[] }) {
   if (events.length === 0) return <Empty>No history yet.</Empty>;
   return (
@@ -687,6 +796,7 @@ export function LotDetailTabs({
   pastBuyers,
   canWrite,
   isOwner,
+  closeout,
 }: {
   lot: LotRecord;
   status: LotStatusRecord | null;
@@ -708,6 +818,7 @@ export function LotDetailTabs({
   pastBuyers: string[];
   canWrite: boolean;
   isOwner: boolean;
+  closeout: { actual: CloseoutActual; proj: CloseoutProjection; rates: CloseoutRates } | null;
 }) {
   const [active, setActive] = useState<SectionKey>("current");
   const tabs = TABS.filter((t) => !t.feedPenOnly || lot.is_feed_pen);
@@ -785,7 +896,7 @@ export function LotDetailTabs({
           sales={sales}
         />
       )}
-      {active === "closeout" && <NotYetMigrated label="Closeout" />}
+      {active === "closeout" && <Closeout closeout={closeout} />}
       {active === "feedpen" && <NotYetMigrated label="Feed pen" />}
       {active === "audit" && <AuditLog events={audit} />}
     </div>

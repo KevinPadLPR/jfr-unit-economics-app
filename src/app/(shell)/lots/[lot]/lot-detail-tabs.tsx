@@ -12,6 +12,7 @@ import type { MoveEvent, LotTransfer } from "./data/moves";
 import type { Sale } from "./data/sales";
 import type { AuditEvent } from "./data/audit";
 import type { CloseoutActual, CloseoutProjection, CloseoutRates } from "./closeout-math";
+import { CloseoutAssumptionsForm } from "./closeout-actions";
 import type { ActivePasture, FieldAction, MedicationCatalogEntry, ReceivingProtocol } from "./data/reference";
 import { HealthActionButtons } from "./health-actions";
 import { MoveActionButton } from "./moves-actions";
@@ -647,7 +648,19 @@ function money4(n: number | null | undefined): string {
  * lot's cost to date; Projection is the lot's cost at close (Actual's own figures plus the
  * forward slice), the same pairing the live calculator shows side by side.
  */
-function Closeout({ closeout }: { closeout: { actual: CloseoutActual; proj: CloseoutProjection; rates: CloseoutRates } | null }) {
+function Closeout({
+  lotId,
+  lotNumber,
+  arrivalDate,
+  canWrite,
+  closeout,
+}: {
+  lotId: string;
+  lotNumber: string;
+  arrivalDate: string | null;
+  canWrite: boolean;
+  closeout: { actual: CloseoutActual; proj: CloseoutProjection; rates: CloseoutRates; savedDaysOnFeed: number | null } | null;
+}) {
   if (!closeout) return <Empty>Add at least one invoice to enable closeout projections.</Empty>;
   const { actual: a, proj: p, rates } = closeout;
 
@@ -664,6 +677,9 @@ function Closeout({ closeout }: { closeout: { actual: CloseoutActual; proj: Clos
 
   return (
     <div className="flex flex-col gap-4">
+      {canWrite && (
+        <CloseoutAssumptionsForm lotId={lotId} lotNumber={lotNumber} arrivalDate={arrivalDate} savedDaysOnFeed={closeout.savedDaysOnFeed} rates={rates} />
+      )}
       <Card>
         <Table>
           <TableHeader>
@@ -797,6 +813,7 @@ export function LotDetailTabs({
   canWrite,
   isOwner,
   closeout,
+  arrivalDate,
 }: {
   lot: LotRecord;
   status: LotStatusRecord | null;
@@ -818,7 +835,8 @@ export function LotDetailTabs({
   pastBuyers: string[];
   canWrite: boolean;
   isOwner: boolean;
-  closeout: { actual: CloseoutActual; proj: CloseoutProjection; rates: CloseoutRates } | null;
+  closeout: { actual: CloseoutActual; proj: CloseoutProjection; rates: CloseoutRates; savedDaysOnFeed: number | null } | null;
+  arrivalDate: string | null;
 }) {
   const [active, setActive] = useState<SectionKey>("current");
   const tabs = TABS.filter((t) => !t.feedPenOnly || lot.is_feed_pen);
@@ -896,7 +914,7 @@ export function LotDetailTabs({
           sales={sales}
         />
       )}
-      {active === "closeout" && <Closeout closeout={closeout} />}
+      {active === "closeout" && <Closeout lotId={lot.id} lotNumber={lot.lot_number} arrivalDate={arrivalDate} canWrite={canWrite} closeout={closeout} />}
       {active === "feedpen" && <NotYetMigrated label="Feed pen" />}
       {active === "audit" && <AuditLog events={audit} />}
     </div>

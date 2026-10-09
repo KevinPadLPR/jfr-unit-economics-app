@@ -153,6 +153,10 @@ function computeHeadAdjTotals(rows: { head_count: number | null }[]): HeadAdjTot
 export interface CloseoutData {
   inputs: CloseoutInputs;
   rates: CloseoutRates;
+  /** The lot's own saved target_days_on_feed -- not part of `rates` (closeoutRates() never reads
+   * it directly, only via the derived-from-ship-date hidden field), but the Save Assumptions
+   * form needs it as the fallback when no ship date is set. */
+  savedDaysOnFeed: number | null;
 }
 
 export async function getCloseoutInputs(lotId: string, status: LotStatusRecord, arrivalDate: string | null, today: string): Promise<CloseoutData> {
@@ -247,7 +251,7 @@ export async function getCloseoutInputs(lotId: string, status: LotStatusRecord, 
     { head_in: status.head_in, total_weight_in: status.total_weight_in }
   );
 
-  return { inputs, rates };
+  return { inputs, rates, savedDaysOnFeed: assumptions?.target_days_on_feed ?? null };
 }
 
 /** Ported from currentHeadDaysToDate (index.html:7371-7374): summed client-side, `null` (not 0)

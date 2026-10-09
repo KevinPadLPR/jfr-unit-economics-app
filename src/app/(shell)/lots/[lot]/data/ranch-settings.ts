@@ -1,12 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
+import { ranchNonFeedRateOn, type NonfeedRate } from "../closeout-math";
 
-export interface NonfeedRate {
-  effective_from: string;
-  rate_per_head_day: number;
-  includes_pasture: boolean | null;
-  is_placeholder: boolean | null;
-  notes: string | null;
-}
+export type { NonfeedRate };
 
 export interface RanchSettings {
   feedDirectFrom: string | null;
@@ -99,20 +94,4 @@ export async function getHeadDaysAfterBoundary(lotId: string, feedDirectFrom: st
   }
 
   return { headDaysAfterBoundary, feedAfterBoundary, nonFeedRanchCharge };
-}
-
-/** Ported from ranchNonFeedRateOn() (index.html:8596-8600): the dated rate in force on a given
- * day -- the last rate whose effective_from is on or before it. Pure, exported for Vitest. */
-export function ranchNonFeedRateOn(rates: NonfeedRate[], day: string): NonfeedRate | null {
-  let current: NonfeedRate | null = null;
-  for (const r of rates) {
-    if (r.effective_from <= day) current = r;
-    else break;
-  }
-  return current;
-}
-
-/** Ported from ranchNonFeedLatest() (index.html:8602-8604): the newest dated rate on file. */
-export function ranchNonFeedLatest(rates: NonfeedRate[]): NonfeedRate | null {
-  return rates.length ? rates[rates.length - 1] : null;
 }

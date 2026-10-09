@@ -1,5 +1,33 @@
-import type { NonfeedRate } from "./data/ranch-settings";
-import { ranchNonFeedLatest } from "./data/ranch-settings";
+/**
+ * NonfeedRate/ranchNonFeedRateOn/ranchNonFeedLatest live here, not in data/ranch-settings.ts,
+ * because this file is imported by closeout-actions.tsx (a client component, for `daysBetween`)
+ * -- anything it imports must be pure, with zero dependency on server-only code
+ * (data/ranch-settings.ts's own reads pull in next/headers via @/lib/supabase/server, which
+ * cannot bundle into client code). data/ranch-settings.ts imports these back from here instead.
+ */
+export interface NonfeedRate {
+  effective_from: string;
+  rate_per_head_day: number;
+  includes_pasture: boolean | null;
+  is_placeholder: boolean | null;
+  notes: string | null;
+}
+
+/** Ported from ranchNonFeedRateOn() (index.html:8596-8600): the dated rate in force on a given
+ * day -- the last rate whose effective_from is on or before it. */
+export function ranchNonFeedRateOn(rates: NonfeedRate[], day: string): NonfeedRate | null {
+  let current: NonfeedRate | null = null;
+  for (const r of rates) {
+    if (r.effective_from <= day) current = r;
+    else break;
+  }
+  return current;
+}
+
+/** Ported from ranchNonFeedLatest() (index.html:8602-8604): the newest dated rate on file. */
+export function ranchNonFeedLatest(rates: NonfeedRate[]): NonfeedRate | null {
+  return rates.length ? rates[rates.length - 1] : null;
+}
 
 /** Ranch-local "today" (America/Chicago calendar day), the same boundary the database's
  * ranch_today() uses -- ported from ranchToday() (index.html:8562-8567). Safe to call

@@ -75,15 +75,15 @@ export default async function LotDetailPage({ params }: { params: Promise<{ lot:
   const canWrite = role ? canWriteLotEntries(role) : false;
   const isOwner = role === "owner";
 
-  // Closeout (Phase 9, read-only): mirrors the vanilla app's own gate (index.html:9216-9220) --
-  // no invoice yet means nothing to project.
+  // Closeout (Phase 9 read-only, Phase 10 Save Assumptions): mirrors the vanilla app's own gate
+  // (index.html:9216-9220) -- no invoice yet means nothing to project.
   let closeout = null;
   if (status && status.head_in) {
     const today = ranchTodayIso();
-    const { inputs, rates } = await getCloseoutInputs(lot.id, status, editDetail?.arrival_date ?? null, today);
+    const { inputs, rates, savedDaysOnFeed } = await getCloseoutInputs(lot.id, status, editDetail?.arrival_date ?? null, today);
     const actual = closeoutActual(inputs, rates);
     const proj = closeoutProjection(inputs, rates, actual);
-    closeout = { actual, proj, rates };
+    closeout = { actual, proj, rates, savedDaysOnFeed };
   }
 
   return (
@@ -119,6 +119,7 @@ export default async function LotDetailPage({ params }: { params: Promise<{ lot:
         canWrite={canWrite}
         isOwner={isOwner}
         closeout={closeout}
+        arrivalDate={editDetail?.arrival_date ?? null}
       />
     </div>
   );

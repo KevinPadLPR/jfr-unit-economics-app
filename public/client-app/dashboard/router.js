@@ -18,7 +18,7 @@ window.UEDash = window.UEDash || {};
   // window.location.search either. overviewFrom/overviewTo are Overview's own time-period slicer;
   // marketInstrument/marketSource are Market Data's own selectors (month/lot are shared across
   // the other sub-tabs; each new tab's own state is its own concern, not shared).
-  const dashState = { lot: null, month: null, overviewFrom: null, overviewTo: null, marketInstrument: null, marketSource: null };
+  const dashState = { lot: null, month: null, overviewFrom: null, overviewTo: null, marketInstrument: null, marketSource: null, opsPerHead: false };
 
   const RENDERERS = {
     overview: "renderOverview",
@@ -29,6 +29,7 @@ window.UEDash = window.UEDash || {};
     "lot-scorecard": "renderLotScorecard",
     "market-position": "renderMarketPosition",
     "market-data": "renderMarketData",
+    operations: "renderOperations",
   };
 
   function renderSubtab(subtab) {

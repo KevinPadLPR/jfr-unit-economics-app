@@ -5,7 +5,7 @@ window.UEDash = window.UEDash || {};
   const { getGlLotSummary, getCostOfGain } = window.UEDash;
   const { getLatestFeederSettle } = window.UEDash;
   const { getLotAttrsRollup, getCrosswalkInfo } = window.UEDash;
-  const { sumReportAmount } = window.UEDash;
+  const { sumReportAmount, getTotalCostToDate } = window.UEDash;
 
   async function getHeadMovements(lot) {
     const { data, error } = await supabase.from("ue_gl_head_movements").select("date, movement_type, head, lbs, amount, dollar_per_head, notes").eq("lot", lot).order("date", { ascending: true });
@@ -69,13 +69,14 @@ window.UEDash = window.UEDash || {};
     const summary = await getGlLotSummary(lot);
     if (!summary) return undefined;
 
-    const [activity, cog, revenue, attrs, settle, crosswalk] = await Promise.all([
+    const [activity, cog, revenue, attrs, settle, crosswalk, totalCostToDate] = await Promise.all([
       getLotActivityLedger(lot),
       getCostOfGain(lot),
       sumReportAmount(lot, { reportSection: "Revenue" }),
       getLotAttrsRollup(lot),
       getLatestFeederSettle(),
       getCrosswalkInfo(lot),
+      getTotalCostToDate(lot),
     ]);
 
     const headIn = summary.head_in ?? 0;
@@ -97,10 +98,9 @@ window.UEDash = window.UEDash || {};
     const isOpen = (summary.status ?? "").toLowerCase() === "open" && (summary.head_on_hand ?? 0) > 0;
     const markedValueOnHand = isOpen && settle ? ((attrs.projectedCurrentWeight ?? summary.avg_wt_in ?? 0) / 100) * settle.settle * (summary.head_on_hand ?? 0) : null;
 
-    // ue_master_lot_schedule.cost_in_dollars is already the full LTD cost mapped to this lot --
-    // the expense breakdown above is Direct/Indirect detail for display, not a second cost to
-    // add on top.
-    const outstandingCost = summary.cost_in_dollars ?? 0;
+    // Total LTD cost (Purchased Cattle + Direct + Indirect) -- see getTotalCostToDate's own
+    // comment for why this is NOT summary.cost_in_dollars (that column is Purchased-Cattle only).
+    const outstandingCost = totalCostToDate;
     const estimatedPL = revenue + (markedValueOnHand ?? 0) - outstandingCost;
 
     return {

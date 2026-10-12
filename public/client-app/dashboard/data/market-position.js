@@ -3,7 +3,7 @@ window.UEDash = window.UEDash || {};
 
 (function () {
   const { listGlLots } = window.UEDash;
-  const { getLotAttrsRollup } = window.UEDash;
+  const { getLotAttrsRollup, getTotalCostToDateByLot } = window.UEDash;
 
   /**
    * "Nearest" here means most recent settle overall, not the contract month that actually
@@ -26,6 +26,10 @@ window.UEDash = window.UEDash || {};
   async function getMarketPosition() {
     const [settle, lots] = await Promise.all([getLatestFeederSettle(), listGlLots()]);
     const openLots = lots.filter((l) => (l.status ?? "").toLowerCase() === "open" && (l.head_on_hand ?? 0) > 0);
+    // Total LTD cost (Cattle+Direct+Indirect), not ue_master_lot_schedule.cost_in_dollars --
+    // that column is Purchased-Cattle only, which would understate cost basis and overstate
+    // "Unrealized" (confirmed 2026-10-12 against the ETL's own build_lots()).
+    const costByLot = await getTotalCostToDateByLot(openLots.map((l) => l.lot));
 
     return Promise.all(
       openLots.map(async (l) => {
@@ -34,7 +38,7 @@ window.UEDash = window.UEDash || {};
         const headOnHand = l.head_on_hand ?? 0;
 
         const markedValue = settle && projectedWeightPerHead ? (projectedWeightPerHead / 100) * settle.settle * headOnHand : null;
-        const costBasis = l.cost_in_dollars ?? null;
+        const costBasis = costByLot.has(l.lot) ? costByLot.get(l.lot) : null;
 
         return {
           lot: l.lot,

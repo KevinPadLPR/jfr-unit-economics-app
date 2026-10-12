@@ -51,6 +51,30 @@ window.UEDash = window.UEDash || {};
    * weekly $/lb would show a false monthly spike (the same reason the Excel "Weekly Cost of
    * Gain" block is dollars-only).
    */
+  /**
+   * Full life-to-date cost for one lot: Purchased Cattle + Direct + Indirect. Deliberately NOT
+   * ue_master_lot_schedule.cost_in_dollars -- confirmed 2026-10-12 against the ETL's own
+   * build_lots() (JFR Unit Economics Automation.ipynb) that column is only the Cattle Inventory
+   * report's "Cost In $" (Purchase/Born/Transfer-In head movements), renamed on sync. It never
+   * includes Direct/Indirect, so using it as "total cost" understates cost and overstates P/L.
+   */
+  async function getTotalCostToDate(lot) {
+    const { data, error } = await supabase.from("ue_gl_lot_report_line_summary").select("report_section, total").eq("lot", lot).in("report_section", ["Cattle", "Direct", "Indirect"]);
+    if (error) throw error;
+    return (data ?? []).reduce((s, r) => s + (r.total ?? 0), 0);
+  }
+
+  /** Same as getTotalCostToDate, for many lots in one query -- avoids an N+1 round trip for
+   * screens (Market Position) that need this for every open lot at once. */
+  async function getTotalCostToDateByLot(lots) {
+    if (!lots.length) return new Map();
+    const { data, error } = await supabase.from("ue_gl_lot_report_line_summary").select("lot, report_section, total").in("lot", lots).in("report_section", ["Cattle", "Direct", "Indirect"]);
+    if (error) throw error;
+    const byLot = new Map();
+    for (const r of data ?? []) byLot.set(r.lot, (byLot.get(r.lot) ?? 0) + (r.total ?? 0));
+    return byLot;
+  }
+
   async function getWeeklyCostSeries(lot) {
     const { data, error } = await supabase.from("ue_gl_lot_week_cost").select("week_end, direct, indirect").eq("lot", lot).order("week_end", { ascending: false }).limit(13);
     if (error) throw error;
@@ -77,6 +101,8 @@ window.UEDash = window.UEDash || {};
     DEATH_LOSS_LINE,
     LRP_LINE,
     sumReportAmount,
+    getTotalCostToDate,
+    getTotalCostToDateByLot,
     getDirectCostBreakdown,
     getWeeklyCostSeries,
     getMonthlyHeadSeries,

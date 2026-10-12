@@ -27,8 +27,12 @@ window.UEDash = window.UEDash || {};
     if (!summary) return undefined;
 
     const headDays = summary.head_days ?? 0;
-    const attrs = await getLotAttrsRollup(lot, summary.target_adg ?? 0);
-    const poundsGained = headDays * attrs.adgUsed;
+    const attrs = await getLotAttrsRollup(lot);
+    // Pounds gained (and everything divided by it) is a formula on ADG -- only real when the ADG
+    // feeding it is itself measured (attrs.isMeasured). No more falling back to a target/assumed
+    // ADG: per John's rule (2026-10-12), an unmeasured lot shows no pounds-gained-based figure at
+    // all, not a guessed one.
+    const poundsGained = attrs.isMeasured ? headDays * attrs.adgUsed : null;
 
     const [feedForage, health, laborOverhead, deathLoss, lrp, grazingSummerNative, costBreakdown] = await Promise.all([
       sumReportAmount(lot, { reportLines: FEED_FORAGE_LINES }),
@@ -42,13 +46,13 @@ window.UEDash = window.UEDash || {};
     const operating = feedForage + health + laborOverhead;
     const allIn = operating + deathLoss + lrp;
 
-    const safeDiv = (n, d) => (d > 0 ? n / d : null);
+    const safeDiv = (n, d) => (n != null && d != null && d > 0 ? n / d : null);
 
     return {
       lot,
       headDays,
+      isMeasured: attrs.isMeasured,
       adgUsed: attrs.adgUsed,
-      adgProvenance: attrs.adgProvenance,
       adgSourceDetail: attrs.adgSourceDetail,
       poundsGained,
       feedForage,
@@ -68,8 +72,8 @@ window.UEDash = window.UEDash || {};
   }
 
   async function getConfidenceGrade(lot) {
-    const [attrs, crosswalk] = await Promise.all([getLotAttrsRollup(lot, 0), getCrosswalkInfo(lot)]);
-    if (!attrs.hasAppData) return "L";
+    const [attrs, crosswalk] = await Promise.all([getLotAttrsRollup(lot), getCrosswalkInfo(lot)]);
+    if (!attrs.isMeasured) return "L";
     if (crosswalk.decisionNeeded || attrs.anyWeightStale) return "M";
     return "H";
   }

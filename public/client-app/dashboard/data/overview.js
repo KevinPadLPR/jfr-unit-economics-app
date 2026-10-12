@@ -28,13 +28,8 @@ window.UEDash = window.UEDash || {};
     ]);
     const openLots = lots.filter((l) => (l.status ?? "").toLowerCase() === "open");
 
-    // One parallel pass per open lot instead of two sequential ones -- anyWeightStale/
-    // hasAppData don't depend on the fallback ADG argument, so the same getLotAttrsRollup call
-    // (fallback = this lot's own target ADG) covers what used to be two separate round-trips
-    // per lot.
-    const perLot = await Promise.all(
-      openLots.map((lot) => Promise.all([getLotAttrsRollup(lot.lot, lot.target_adg ?? 0), getCrosswalkInfo(lot.lot)]))
-    );
+    // One parallel pass per open lot instead of two sequential ones.
+    const perLot = await Promise.all(openLots.map((lot) => Promise.all([getLotAttrsRollup(lot.lot), getCrosswalkInfo(lot.lot)])));
 
     let headOwned = 0;
     let poundsOwned = 0;

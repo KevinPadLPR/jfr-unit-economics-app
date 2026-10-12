@@ -71,25 +71,31 @@ window.UEDash = window.UEDash || {};
 
     body.innerHTML = `
       <div class="stack">
+        ${!cog.isMeasured ? reportUnavailableHtml(`${cog.adgSourceDetail} Cost of gain (a $/lb rate) needs a real average daily gain to divide by -- showing a rate built on an assumed ADG would be exactly the kind of guess this dashboard no longer makes.`) : ""}
         ${!cog.grazingSummerNativeBooked ? reportUnavailableHtml(`Summer grazing costs for lot ${cog.lot} haven't been booked yet. Feed cost of gain is understated until they are.`) : ""}
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          ${statTileHtml({ label: "Cost of Gain: Feed only", value: formatPerLb(cog.cogFeed), provenance: "modeled", delta: formatMoney(cog.feedForage) + " total" })}
-          ${statTileHtml({ label: "Cost of Gain: Operating", value: formatPerLb(cog.cogOper), provenance: "modeled", delta: formatMoney(cog.operating) + " total" })}
-          ${statTileHtml({ label: "Cost of Gain: All-in", value: formatPerLb(cog.cogAllIn), provenance: "modeled", delta: formatMoney(cog.allIn) + " total" })}
+          ${statTileHtml({ label: "Cost of Gain: Feed only", value: formatPerLb(cog.cogFeed), provenance: cog.isMeasured ? "modeled" : undefined, delta: formatMoney(cog.feedForage) + " total" })}
+          ${statTileHtml({ label: "Cost of Gain: Operating", value: formatPerLb(cog.cogOper), provenance: cog.isMeasured ? "modeled" : undefined, delta: formatMoney(cog.operating) + " total" })}
+          ${statTileHtml({ label: "Cost of Gain: All-in", value: formatPerLb(cog.cogAllIn), provenance: cog.isMeasured ? "modeled" : undefined, delta: formatMoney(cog.allIn) + " total" })}
         </div>
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
           ${statTileHtml({ label: "Head-days", value: formatNumber(cog.headDays), provenance: "measured" })}
-          ${statTileHtml({ label: "ADG used", value: `${cog.adgUsed.toFixed(2)} lb/day`, provenance: cog.adgProvenance, delta: cog.adgSourceDetail })}
-          ${statTileHtml({ label: "Pounds gained (LTD)", value: formatNumber(cog.poundsGained), provenance: "modeled" })}
-          ${statTileHtml({ label: "$ / head-day (operating)", value: formatMoney(cog.costPerHeadDayOperating, { cents: true }), provenance: "modeled" })}
+          ${statTileHtml({
+            label: "ADG used",
+            value: cog.isMeasured ? `${cog.adgUsed.toFixed(2)} lb/day` : "-",
+            provenance: cog.isMeasured ? "measured" : undefined,
+            delta: cog.adgSourceDetail,
+          })}
+          ${statTileHtml({ label: "Pounds gained (LTD)", value: formatNumber(cog.poundsGained), provenance: cog.isMeasured ? "measured" : undefined })}
+          ${statTileHtml({ label: "$ / head-day (operating)", value: formatMoney(cog.costPerHeadDayOperating, { cents: true }), provenance: "measured" })}
         </div>
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div class="card" style="${cog.costBreakdown.length ? "" : "display:none"}">
             <div class="card-header"><h3 class="card-title card-title-base">Direct cost breakdown (life-to-date)</h3><p class="card-description">Every direct cost line for this lot, biggest first.</p></div>
             <div class="chart-box h-72"><canvas id="cost-breakdown-chart"></canvas></div>
           </div>
-          <div class="card" style="${targetAdg === null ? "display:none" : ""}">
-            <div class="card-header"><h3 class="card-title card-title-base">Target vs. actual daily gain</h3><p class="card-description">How this lot's cattle are gaining weight against what was assumed going in. A snapshot, not a trend, since a lot only gets one realized ADG reading at a time.</p></div>
+          <div class="card" style="${targetAdg === null || !cog.isMeasured ? "display:none" : ""}">
+            <div class="card-header"><h3 class="card-title card-title-base">Target vs. actual daily gain</h3><p class="card-description">How this lot's cattle are gaining weight against what was assumed going in. A snapshot, not a trend, since a lot only gets one realized ADG reading at a time. Shown only once this lot has a real measured ADG to compare against.</p></div>
             <div class="chart-box h-48"><canvas id="adg-chart"></canvas></div>
           </div>
         </div>
@@ -100,7 +106,7 @@ window.UEDash = window.UEDash || {};
       </div>`;
 
     if (cog.costBreakdown.length) directCostBreakdownChart(body.querySelector("#cost-breakdown-chart"), cog.costBreakdown);
-    if (targetAdg !== null) adgComparisonChart(body.querySelector("#adg-chart"), targetAdg, cog.adgUsed);
+    if (targetAdg !== null && cog.isMeasured) adgComparisonChart(body.querySelector("#adg-chart"), targetAdg, cog.adgUsed);
     if (weekly.length) stackedCostBarChart(body.querySelector("#weekly-cost-chart"), weekly, { xKey: "week_end" });
   }
 

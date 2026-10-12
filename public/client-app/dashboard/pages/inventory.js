@@ -10,12 +10,11 @@ window.UEDash = window.UEDash || {};
   const { headWaterfallChart, headCountBarChart } = window.UEDash;
 
   let currentRows = [];
-  let groupBy = "location";
+  let groupBy = "profit-center";
 
   function groupKey(row, by) {
     if (by === "lot") return row.lot;
-    if (by === "location") return row.locationType ?? "Unspecified";
-    return row.feedType ?? "Unspecified";
+    return row.profitCenter ?? "Unspecified";
   }
 
   function drawBalanceChart(container) {
@@ -26,7 +25,7 @@ window.UEDash = window.UEDash || {};
     }
     const data = [...totals.entries()].map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
     headCountBarChart(container.querySelector("#balance-chart"), data, { rotateLabels: groupBy === "lot" });
-    container.querySelector("#balance-desc").textContent = `Ending count for the month, grouped by ${{ lot: "lot", location: "location", feed: "feed type" }[groupBy]}.`;
+    container.querySelector("#balance-desc").textContent = `Ending count for the month, grouped by ${{ lot: "lot", "profit-center": "profit center" }[groupBy]}.`;
     container.querySelectorAll("[data-group]").forEach((btn) => btn.classList.toggle("active", btn.dataset.group === groupBy));
   }
 
@@ -83,7 +82,7 @@ window.UEDash = window.UEDash || {};
       showError(body, err);
       return;
     }
-    const { totals, rows, byLocation } = snapshot;
+    const { totals, rows, byProfitCenter } = snapshot;
     currentRows = rows;
 
     const statRow = (label, value) => statTileHtml({ label, value, provenance: "measured" });
@@ -108,8 +107,7 @@ window.UEDash = window.UEDash || {};
               <div><h3 class="card-title card-title-base">Head on hand today</h3><p class="card-description" id="balance-desc"></p></div>
               <div class="flex gap-1">
                 <button type="button" class="btn btn-outline btn-sm" data-group="lot">Lot</button>
-                <button type="button" class="btn btn-outline btn-sm" data-group="location">Location</button>
-                <button type="button" class="btn btn-outline btn-sm" data-group="feed">Feed type</button>
+                <button type="button" class="btn btn-outline btn-sm" data-group="profit-center">Profit center</button>
               </div>
             </div>
             <div class="chart-box h-72"><canvas id="balance-chart"></canvas></div>
@@ -119,7 +117,7 @@ window.UEDash = window.UEDash || {};
       </div>`;
 
     headWaterfallChart(body.querySelector("#waterfall-chart"), totals);
-    groupBy = "location";
+    groupBy = "profit-center";
     drawBalanceChart(body);
     body.querySelectorAll("[data-group]").forEach((btn) =>
       btn.addEventListener("click", () => {
@@ -129,7 +127,7 @@ window.UEDash = window.UEDash || {};
     );
 
     const locationCards = body.querySelector("#location-cards");
-    locationCards.innerHTML = byLocation
+    locationCards.innerHTML = byProfitCenter
       .map((group) => {
         const rowHtml = (row) => `
           <tr>
@@ -145,7 +143,7 @@ window.UEDash = window.UEDash || {};
           </tr>`;
         return `
           <div class="card">
-            <div class="card-header"><h3 class="card-title card-title-base">${escapeHtml(group.location)}</h3></div>
+            <div class="card-header"><h3 class="card-title card-title-base">${escapeHtml(group.profitCenter)}</h3></div>
             <div class="table-wrap">
               <table class="data-table">
                 <thead><tr><th>Lot</th><th class="text-right">Beginning</th><th class="text-right">Purch.</th><th class="text-right">Born</th><th class="text-right">Trans. In</th><th class="text-right">Trans. Out</th><th class="text-right">Sold</th><th class="text-right">Died</th><th class="text-right">Ending</th></tr></thead>

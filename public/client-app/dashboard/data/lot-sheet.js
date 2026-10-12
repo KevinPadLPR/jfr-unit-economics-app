@@ -73,7 +73,7 @@ window.UEDash = window.UEDash || {};
       getLotActivityLedger(lot),
       getCostOfGain(lot),
       sumReportAmount(lot, { reportSection: "Revenue" }),
-      getLotAttrsRollup(lot, summary.target_adg ?? 0),
+      getLotAttrsRollup(lot),
       getLatestFeederSettle(),
       getCrosswalkInfo(lot),
     ]);
@@ -106,9 +106,7 @@ window.UEDash = window.UEDash || {};
     return {
       lot,
       summary,
-      scheduleFeedType: summary.feed_type,
-      scheduleLocationType: summary.location_type,
-      scheduleState: summary.state,
+      scheduleProfitCenter: summary.profit_center,
       activity,
       expenses: { direct, directTotal, general, total },
       revenue,
@@ -116,7 +114,7 @@ window.UEDash = window.UEDash || {};
       outstandingCost,
       estimatedPL,
       crosswalk,
-      hasAppData: attrs.hasAppData,
+      isMeasured: attrs.isMeasured,
     };
   }
 

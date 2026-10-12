@@ -29,7 +29,7 @@ window.UEDash = window.UEDash || {};
 
     return Promise.all(
       openLots.map(async (l) => {
-        const attrs = await getLotAttrsRollup(l.lot, l.target_adg ?? 0);
+        const attrs = await getLotAttrsRollup(l.lot);
         const projectedWeightPerHead = attrs.projectedCurrentWeight ?? l.avg_wt_in;
         const headOnHand = l.head_on_hand ?? 0;
 

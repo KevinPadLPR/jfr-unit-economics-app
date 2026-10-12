@@ -90,7 +90,7 @@ window.UEDash = window.UEDash || {};
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 class="text-2xl font-semibold text-foreground">${escapeHtml(sheet.lot)}</h1>
-            <p class="text-sm text-muted-foreground">${escapeHtml(summary.profit_center ?? "")} · ${escapeHtml(sheet.scheduleFeedType ?? "feed type n/a")} · ${escapeHtml(sheet.scheduleLocationType ?? "location n/a")} ${sheet.scheduleState ? `· ${escapeHtml(sheet.scheduleState)}` : ""}</p>
+            <p class="text-sm text-muted-foreground">${escapeHtml(sheet.scheduleProfitCenter ?? "Profit center n/a")}</p>
           </div>
           <div class="flex items-center gap-3">
             <div id="lot-picker"></div>

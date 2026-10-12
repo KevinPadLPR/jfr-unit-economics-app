@@ -5,8 +5,11 @@ window.UEDash = window.UEDash || {};
   const { listGlLots, getCostOfGain, getConfidenceGrade } = window.UEDash;
 
   async function getLotScorecard() {
-    // ue_master_lot_schedule already carries feed_type/location_type on the same row as
-    // everything else -- one query via listGlLots() instead of two.
+    // ue_master_lot_schedule already carries profit_center on the same row as everything else --
+    // one query via listGlLots() instead of two. feed_type/location_type dropped: confirmed
+    // (2026-10-12) to be our own regex-on-lot-name heuristic, never real client/GL data, never
+    // corrected by anyone -- profit_center (Stockers/Feeders/Rsd Stockers/Cows) is the one
+    // genuine GL grouping dimension available.
     const lots = await listGlLots();
     return Promise.all(
       lots.map(async (lot) => {
@@ -15,12 +18,11 @@ window.UEDash = window.UEDash || {};
           lot: lot.lot,
           profitCenter: lot.profit_center,
           status: lot.status,
-          feedType: lot.feed_type,
-          locationType: lot.location_type,
           headIn: lot.head_in,
           headOnHand: lot.head_on_hand,
           avgDof: lot.avg_dof,
-          adgUsed: cog?.adgUsed ?? lot.target_adg ?? 0,
+          isMeasured: cog?.isMeasured ?? false,
+          adgUsed: cog?.isMeasured ? cog.adgUsed : null,
           costInDollarsPerHead: lot.cost_in_dollars_per_head,
           cogAllIn: cog?.cogAllIn ?? null,
           confidence,

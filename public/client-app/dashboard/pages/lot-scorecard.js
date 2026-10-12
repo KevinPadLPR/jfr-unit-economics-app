@@ -16,7 +16,7 @@ window.UEDash = window.UEDash || {};
   }
 
   function renderBody(container, rows, filters) {
-    const filtered = rows.filter((r) => (filters.status === ALL || r.status === filters.status) && (filters.feedType === ALL || r.feedType === filters.feedType) && (filters.locationType === ALL || r.locationType === filters.locationType));
+    const filtered = rows.filter((r) => (filters.status === ALL || r.status === filters.status) && (filters.profitCenter === ALL || r.profitCenter === filters.profitCenter));
 
     const chartData = filtered.filter((r) => r.cogAllIn !== null).sort((a, b) => b.cogAllIn - a.cogAllIn);
     const chartHost = container.querySelector("#cog-chart-card");
@@ -26,7 +26,7 @@ window.UEDash = window.UEDash || {};
     container.querySelector("#scorecard-table").innerHTML = `
       <table class="data-table">
         <thead><tr>
-          <th>Lot</th><th>Status</th><th>Feed type</th><th>Location</th>
+          <th>Lot</th><th>Status</th><th>Profit center</th>
           <th class="text-right">Head in</th><th class="text-right">On hand</th><th class="text-right">Avg DOF</th>
           <th class="text-right">ADG used</th><th class="text-right">$ / head in</th><th class="text-right">COG all-in</th><th>Confidence</th>
         </tr></thead>
@@ -37,12 +37,11 @@ window.UEDash = window.UEDash || {};
             <tr>
               <td class="font-medium">${lotLinkHtml(r.lot)}</td>
               <td>${r.status ? escapeHtml(r.status) : "-"}</td>
-              <td>${r.feedType ? escapeHtml(r.feedType) : "-"}</td>
-              <td>${r.locationType ? escapeHtml(r.locationType) : "-"}</td>
+              <td>${r.profitCenter ? escapeHtml(r.profitCenter) : "-"}</td>
               <td class="text-right">${formatNumber(r.headIn)}</td>
               <td class="text-right">${formatNumber(r.headOnHand)}</td>
               <td class="text-right">${formatNumber(r.avgDof)}</td>
-              <td class="text-right">${r.adgUsed.toFixed(2)}</td>
+              <td class="text-right" title="${r.isMeasured ? "" : "No measured weigh-ins yet for this lot"}">${r.isMeasured ? r.adgUsed.toFixed(2) : "-"}</td>
               <td class="text-right">${formatMoney(r.costInDollarsPerHead)}</td>
               <td class="text-right">${formatPerLb(r.cogAllIn)}</td>
               <td>${badgeHtml(CONFIDENCE_LABEL[r.confidence], CONFIDENCE_VARIANT[r.confidence])}</td>
@@ -70,8 +69,7 @@ window.UEDash = window.UEDash || {};
         </div>
         <div class="flex flex-wrap gap-3">
           <div id="status-filter"></div>
-          <div id="feed-filter"></div>
-          <div id="location-filter"></div>
+          <div id="profit-center-filter"></div>
         </div>
         <div class="card" id="cog-chart-card">
           <div class="card-header"><h3 class="card-title card-title-base">Cost of gain, all-in, by lot</h3><p class="card-description">Highest cost per pound first, so you can spot which lots are expensive to run.</p></div>
@@ -82,12 +80,11 @@ window.UEDash = window.UEDash || {};
         </div>
       </div>`;
 
-    const filters = { status: ALL, feedType: ALL, locationType: ALL };
+    const filters = { status: ALL, profitCenter: ALL };
     const refresh = () => renderBody(container, rows, filters);
 
     container.querySelector("#status-filter").append(filterSelect({ label: "Status", value: ALL, options: uniqueOptions(rows, "status"), className: "w-40", onChange: (v) => { filters.status = v; refresh(); } }));
-    container.querySelector("#feed-filter").append(filterSelect({ label: "Feed type", value: ALL, options: uniqueOptions(rows, "feedType"), className: "w-40", onChange: (v) => { filters.feedType = v; refresh(); } }));
-    container.querySelector("#location-filter").append(filterSelect({ label: "Location type", value: ALL, options: uniqueOptions(rows, "locationType"), className: "w-40", onChange: (v) => { filters.locationType = v; refresh(); } }));
+    container.querySelector("#profit-center-filter").append(filterSelect({ label: "Profit center", value: ALL, options: uniqueOptions(rows, "profitCenter"), className: "w-40", onChange: (v) => { filters.profitCenter = v; refresh(); } }));
     refresh();
   }
 

@@ -8,7 +8,7 @@ window.UEDash = window.UEDash || {};
 (function () {
   const { listGlLots } = window.UEDash;
   const { getLotFinancials } = window.UEDash;
-  const { reportUnavailableHtml, showError, escapeHtml, filterSelect, ALL } = window.UEDash;
+  const { reportUnavailableHtml, showError, escapeHtml, filterSelect, ALL, beginRender, isStaleRender } = window.UEDash;
   const { formatMoney, formatDate } = window.UEDash;
 
   const ROWS = [
@@ -54,13 +54,15 @@ window.UEDash = window.UEDash || {};
   }
 
   async function renderFinancial(container) {
+    const token = beginRender(container);
     let lots;
     try {
       lots = await listGlLots();
     } catch (err) {
-      showError(container, err);
+      if (!isStaleRender(container, token)) showError(container, err);
       return;
     }
+    if (isStaleRender(container, token)) return;
 
     const state = window.UEDash.dashState;
 
@@ -79,7 +81,7 @@ window.UEDash = window.UEDash || {};
         </div>
         <div class="card" style="overflow:hidden">
           <div class="card-header"><h3 class="card-title card-title-base">Revenue &amp; cost, by ${state.financialPeriod === "week" ? "week" : "month"}</h3><p class="card-description">Revenue less Cattle Cost, Direct and Indirect -- what's left is Net Income.</p></div>
-          <div class="table-wrap" id="financial-table"></div>
+          <div class="table-wrap" id="financial-table"><p class="text-sm text-muted-foreground" style="padding:1rem;">Loading…</p></div>
         </div>
       </div>`;
 
@@ -108,9 +110,10 @@ window.UEDash = window.UEDash || {};
     try {
       rows = await getLotFinancials({ lots: state.financialLot === ALL ? null : [state.financialLot], period: state.financialPeriod });
     } catch (err) {
-      showError(tableHost, err);
+      if (!isStaleRender(container, token)) showError(tableHost, err);
       return;
     }
+    if (isStaleRender(container, token)) return;
     if (rows === null) {
       tableHost.innerHTML = reportUnavailableHtml(
         "This tab's data views haven't been added to the client's Supabase project yet (docs/sql/2026-10-12_lot_financial_views.sql is drafted and ready to apply). Nothing to show until that runs."

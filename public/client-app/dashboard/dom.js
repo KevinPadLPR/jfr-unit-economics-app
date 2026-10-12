@@ -108,6 +108,27 @@ window.UEDash = window.UEDash || {};
 
   const ALL = "__all__";
 
+  /**
+   * Render-staleness guard. Every sub-tab page re-renders itself into the same `container` on a
+   * filter/lot/period change (an onChange handler just calls renderX(container) again) while an
+   * earlier call's async fetch may still be in flight. Without this, a slow response for the OLD
+   * selection can resolve AFTER a newer one and overwrite the screen with stale data labeled under
+   * the NEW selection -- confirmed 2026-10-12 on Operations: switching lots quickly could leave
+   * the previous lot's numbers on screen under the new lot's name in the picker. Call
+   * beginRender(container) as the very first line of every async render function (this also
+   * self-heals the "switched tabs mid-fetch" case, since the router reuses the same #dashboardContent
+   * element), then isStaleRender(container, token) right before writing fetched data into the DOM --
+   * a stale call just returns without touching anything, since a newer render already owns it.
+   */
+  function beginRender(container) {
+    const token = (Number(container.dataset.renderToken) || 0) + 1;
+    container.dataset.renderToken = String(token);
+    return token;
+  }
+  function isStaleRender(container, token) {
+    return String(token) !== container.dataset.renderToken;
+  }
+
   function showError(container, err) {
     console.error(err);
     container.innerHTML = reportUnavailableHtml(
@@ -140,6 +161,8 @@ window.UEDash = window.UEDash || {};
     reportUnavailableHtml,
     badgeHtml,
     filterSelect,
+    beginRender,
+    isStaleRender,
     ALL,
     showError,
     lotLinkHtml,

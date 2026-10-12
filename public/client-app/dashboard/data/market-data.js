@@ -58,18 +58,32 @@ window.UEDash = window.UEDash || {};
   }
 
   /**
-   * "Internal" (own-basis/negotiated/cash-bid) pricing -- INVESTIGATED 2026-10-12, not built.
-   * Tried deriving it from real GL data alone (Revenue, report_section='Revenue' -> report_line
-   * 'Cattle Sales', divided by physical pounds sold from ue_gl_head_movements' 'Sold' rows) to
-   * avoid needing any new manual-entry table. Verified against real lots and rejected: even after
-   * excluding the Revenue section's other lines (Other Revenue/Insurance Proceeds/Crop Sales/
-   * Hedging Gain), Cattle Sales $ doesn't correspond cleanly to the same-event Sold lbs --
-   * event dates line up but implied $/cwt ranged from a plausible ~$320 to an impossible $1,900+
-   * across real lots checked. Something about how Cattle Sales revenue is recognized (accrual
-   * timing, batched settlement, grading adjustments -- not determined here) decouples it from a
-   * clean per-pound figure. Flagged to Kevin/John rather than shipped as a number; don't resurrect
-   * this approach without first understanding that discrepancy.
+   * "Internal" (own-basis/negotiated) pricing -- FOUND 2026-10-12. First tried deriving it from
+   * GL data alone (Cattle Sales revenue / Sold-movement lbs) and rejected that after verification
+   * (implied $/cwt ranged from plausible to impossible across real lots): ue_gl_head_movements'
+   * "lbs" turned out to be cost-basis pounds for relieving inventory, not the actual pay weight a
+   * buyer settles on, so dividing real revenue by it produces nonsense.
+   *
+   * The client's own native `sales` table (same Supabase project, not a ue_ mirror -- the app's
+   * own sale-entry record, same family as `positions`/`market_quotes`) carries the real thing:
+   * `price_per_cwt`/`price_per_head` already computed from `total_price`/`net_weight_lb` (the
+   * actual buyer pay weight, distinct from `gross_weight_lb` off the scale -- see that table's own
+   * 2026-09-11 backfill notes), audited sale by sale. This is the genuinely measured settlement
+   * price this dashboard was missing, not the GL revenue entry.
+   *
+   * `net_weight_lb`/`price_per_cwt` are null on a real minority of rows (the pay weight was never
+   * recorded) -- shown as "weight not recorded" rather than estimated from gross (a silent
+   * gross-weight fallback would understate the real shrink, same reasoning as this table's own
+   * backfill migration already applied).
    */
+  async function getInternalSales() {
+    const { data, error } = await supabase
+      .from("sales")
+      .select("sale_date, buyer, head_count, net_weight_lb, price_per_cwt, price_per_head, total_price, notes")
+      .order("sale_date", { ascending: true });
+    if (error) throw error;
+    return data ?? [];
+  }
 
-  Object.assign(window.UEDash, { MARKET_INSTRUMENTS: INSTRUMENTS, getPricingHistory, getFuturesCurve, getLrpPositions });
+  Object.assign(window.UEDash, { MARKET_INSTRUMENTS: INSTRUMENTS, getPricingHistory, getFuturesCurve, getLrpPositions, getInternalSales });
 })();

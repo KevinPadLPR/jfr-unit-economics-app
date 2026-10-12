@@ -3,7 +3,7 @@ window.UEDash = window.UEDash || {};
 
 (function () {
   const { getLotScorecard } = window.UEDash;
-  const { filterSelect, badgeHtml, showError, escapeHtml, ALL, lotLinkHtml } = window.UEDash;
+  const { filterSelect, badgeHtml, showError, escapeHtml, ALL, lotLinkHtml, beginRender, isStaleRender } = window.UEDash;
   const { formatMoney, formatPerLb, formatNumber } = window.UEDash;
   const { cogAllInByLotChart } = window.UEDash;
 
@@ -53,13 +53,15 @@ window.UEDash = window.UEDash || {};
   }
 
   async function renderLotScorecard(container) {
+    const token = beginRender(container);
     let rows;
     try {
       rows = await getLotScorecard();
     } catch (err) {
-      showError(container, err);
+      if (!isStaleRender(container, token)) showError(container, err);
       return;
     }
+    if (isStaleRender(container, token)) return;
 
     container.innerHTML = `
       <div class="stack">

@@ -6,10 +6,10 @@
 window.UEDash = window.UEDash || {};
 
 (function () {
-  const { getPricingHistory, getFuturesCurve, getLrpPositions, MARKET_INSTRUMENTS } = window.UEDash;
-  const { statTileHtml, badgeHtml, showError, escapeHtml, reportUnavailableHtml, filterSelect } = window.UEDash;
+  const { getPricingHistory, getFuturesCurve, getLrpPositions, getInternalSales, MARKET_INSTRUMENTS } = window.UEDash;
+  const { statTileHtml, badgeHtml, showError, escapeHtml, reportUnavailableHtml, filterSelect, beginRender, isStaleRender } = window.UEDash;
   const { formatMoney, formatNumber, formatDate } = window.UEDash;
-  const { pricingHistoryChart } = window.UEDash;
+  const { pricingHistoryChart, internalSalesChart } = window.UEDash;
 
   const INSTRUMENT_LABEL = { feeder_cattle: "Feeder cattle", live_cattle: "Live cattle", corn: "Corn" };
   // As-quoted units (docs/sql/2026-09-10_markets_and_positions.sql's own header comment) -- never
@@ -22,13 +22,15 @@ window.UEDash = window.UEDash || {};
   }
 
   async function renderMarketSection(container, instrument) {
+    const token = beginRender(container);
     let history, curve;
     try {
       [history, curve] = await Promise.all([getPricingHistory(instrument), getFuturesCurve(instrument)]);
     } catch (err) {
-      showError(container, err);
+      if (!isStaleRender(container, token)) showError(container, err);
       return;
     }
+    if (isStaleRender(container, token)) return;
 
     container.innerHTML = `
       <div class="stack">
@@ -54,14 +56,68 @@ window.UEDash = window.UEDash || {};
     if (history.length) pricingHistoryChart(container.querySelector("#pricing-history-chart"), history, { unitSuffix: UNIT_LABEL[instrument] });
   }
 
+  async function renderInternalSection(container) {
+    const token = beginRender(container);
+    let sales;
+    try {
+      sales = await getInternalSales();
+    } catch (err) {
+      if (!isStaleRender(container, token)) showError(container, err);
+      return;
+    }
+    if (isStaleRender(container, token)) return;
+
+    const priced = sales.filter((s) => s.price_per_cwt != null);
+
+    container.innerHTML = `
+      <div class="stack">
+        <p class="text-xs text-muted-foreground">JFR's own real settlement price per sale -- from the app's own sale records (total price ÷ actual buyer pay weight), not a GL entry or outside quote.</p>
+        <div class="card" style="${priced.length ? "" : "display:none"}">
+          <div class="card-header"><h3 class="card-title card-title-base">Realized price per sale</h3><p class="card-description">Every sale with a recorded pay weight, in order.</p></div>
+          <div class="chart-box h-72"><canvas id="internal-sales-chart"></canvas></div>
+        </div>
+        ${!priced.length ? reportUnavailableHtml("No sales with a recorded pay weight yet.") : ""}
+        <div class="card" style="overflow:hidden">
+          <div class="card-header"><h3 class="card-title card-title-base">Sales</h3><p class="card-description">Every sale on file, including the ones with no pay weight recorded yet.</p></div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Date</th><th>Buyer</th><th class="text-right">Head</th><th class="text-right">Pay weight</th><th class="text-right">$/cwt</th><th class="text-right">$/head</th><th class="text-right">Total</th><th>Notes</th></tr></thead>
+              <tbody>
+                ${sales.length === 0 ? `<tr><td colspan="8" class="text-center text-muted-foreground">No sales on file yet.</td></tr>` : ""}
+                ${sales
+                  .map(
+                    (s) => `
+                  <tr>
+                    <td>${escapeHtml(formatDate(s.sale_date))}</td>
+                    <td>${s.buyer ? escapeHtml(s.buyer) : "-"}</td>
+                    <td class="text-right">${formatNumber(s.head_count)}</td>
+                    <td class="text-right" title="${s.net_weight_lb == null ? "Pay weight not recorded for this sale" : ""}">${s.net_weight_lb != null ? `${formatNumber(s.net_weight_lb)} lb` : "-"}</td>
+                    <td class="text-right">${s.price_per_cwt != null ? `$${Number(s.price_per_cwt).toFixed(2)}` : "-"}</td>
+                    <td class="text-right">${s.price_per_head != null ? formatMoney(s.price_per_head, { cents: true }) : "-"}</td>
+                    <td class="text-right">${formatMoney(s.total_price)}</td>
+                    <td class="truncate text-muted-foreground" style="max-width:16rem" title="${escapeHtml(s.notes ?? "")}">${s.notes ? escapeHtml(s.notes) : "-"}</td>
+                  </tr>`
+                  )
+                  .join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>`;
+
+    if (priced.length) internalSalesChart(container.querySelector("#internal-sales-chart"), priced);
+  }
+
   async function renderLrpSection(container) {
+    const token = beginRender(container);
     let rows;
     try {
       rows = await getLrpPositions();
     } catch (err) {
-      showError(container, err);
+      if (!isStaleRender(container, token)) showError(container, err);
       return;
     }
+    if (isStaleRender(container, token)) return;
 
     const STATUS_VARIANT = { open: "good", closed: "neutral", expired: "warning" };
 
@@ -142,9 +198,7 @@ window.UEDash = window.UEDash || {};
 
     const marketBody = container.querySelector("#market-body");
     if (source === "internal") {
-      marketBody.innerHTML = reportUnavailableHtml(
-        "No internal/own-basis pricing exists yet -- JFR's own negotiated or cash-bid prices aren't tracked anywhere in Supabase today. (Checked whether a realized price could be derived from GL Revenue ÷ pounds sold instead: the Cattle Sales revenue line doesn't correspond cleanly to the Sold movement's weight event-by-event -- implied prices ranged from a plausible ~$320/cwt to an impossible $180,000+/cwt across real lots, so that path isn't reliable either without understanding why revenue recognition and physical movement diverge. Flagged for Kevin/John rather than shown as a number.) This selector will light up once a trustworthy source exists."
-      );
+      await renderInternalSection(marketBody);
     } else {
       await renderMarketSection(marketBody, instrument);
     }

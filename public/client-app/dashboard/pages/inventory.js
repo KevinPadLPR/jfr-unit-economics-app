@@ -5,7 +5,7 @@ window.UEDash = window.UEDash || {};
 
 (function () {
   const { getAvailableMonths, getInventorySnapshot } = window.UEDash;
-  const { statTileHtml, reportUnavailableHtml, filterSelect, showError, escapeHtml, lotLinkHtml } = window.UEDash;
+  const { statTileHtml, reportUnavailableHtml, filterSelect, showError, escapeHtml, lotLinkHtml, beginRender, isStaleRender } = window.UEDash;
   const { formatNumber, formatDate } = window.UEDash;
   const { headWaterfallChart, headCountBarChart } = window.UEDash;
 
@@ -30,13 +30,15 @@ window.UEDash = window.UEDash || {};
   }
 
   async function renderInventory(container) {
+    const token = beginRender(container);
     let months;
     try {
       months = await getAvailableMonths();
     } catch (err) {
-      showError(container, err);
+      if (!isStaleRender(container, token)) showError(container, err);
       return;
     }
+    if (isStaleRender(container, token)) return;
     const state = window.UEDash.dashState;
     const monthEnd = state.month && months.includes(state.month) ? state.month : months[0];
     state.month = monthEnd ?? null;
@@ -50,7 +52,7 @@ window.UEDash = window.UEDash || {};
           </div>
           <div id="month-picker"></div>
         </div>
-        <div id="body"></div>
+        <div id="body"><p class="text-sm text-muted-foreground" style="padding:2rem;">Loading…</p></div>
       </div>`;
 
     if (monthEnd) {
@@ -79,9 +81,10 @@ window.UEDash = window.UEDash || {};
     try {
       snapshot = await getInventorySnapshot(monthEnd);
     } catch (err) {
-      showError(body, err);
+      if (!isStaleRender(container, token)) showError(body, err);
       return;
     }
+    if (isStaleRender(container, token)) return;
     const { totals, rows, byProfitCenter } = snapshot;
     currentRows = rows;
 

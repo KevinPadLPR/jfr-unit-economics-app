@@ -9,7 +9,7 @@ window.UEDash = window.UEDash || {};
   const { listGlLots } = window.UEDash;
   const { getLotFlow } = window.UEDash;
   const { getMonthlyHeadSeries, getWeeklyCostSeries } = window.UEDash;
-  const { statTileHtml, filterSelect, badgeHtml, showError, escapeHtml, reportUnavailableHtml } = window.UEDash;
+  const { statTileHtml, filterSelect, badgeHtml, showError, escapeHtml, reportUnavailableHtml, beginRender, isStaleRender } = window.UEDash;
   const { formatMoney, formatNumber, formatDate, formatPct } = window.UEDash;
   const { lotFlowBarChart, monthlyHeadAreaChart, stackedCostBarChart } = window.UEDash;
 
@@ -23,13 +23,15 @@ window.UEDash = window.UEDash || {};
   };
 
   async function renderLotDetail(container) {
+    const token = beginRender(container);
     let allLotsRaw;
     try {
       allLotsRaw = await listGlLots();
     } catch (err) {
-      showError(container, err);
+      if (!isStaleRender(container, token)) showError(container, err);
       return;
     }
+    if (isStaleRender(container, token)) return;
 
     const state = window.UEDash.dashState;
     let lot = state.lot;
@@ -46,9 +48,10 @@ window.UEDash = window.UEDash || {};
     try {
       sheet = await getLotSheet(lot);
     } catch (err) {
-      showError(container, err);
+      if (!isStaleRender(container, token)) showError(container, err);
       return;
     }
+    if (isStaleRender(container, token)) return;
     if (!sheet) {
       container.innerHTML = reportUnavailableHtml(`Lot "${lot}" was not found.`);
       return;
@@ -61,9 +64,10 @@ window.UEDash = window.UEDash || {};
     try {
       [flow, monthlyHead, weeklyCost] = await Promise.all([getLotFlow(lot, summary.head_on_hand ?? 0), getMonthlyHeadSeries(lot), getWeeklyCostSeries(lot)]);
     } catch (err) {
-      showError(container, err);
+      if (!isStaleRender(container, token)) showError(container, err);
       return;
     }
+    if (isStaleRender(container, token)) return;
     const allLots = allLotsRaw.map((l) => ({ lot: l.lot, status: l.status }));
 
     const activityRow = (row) => `

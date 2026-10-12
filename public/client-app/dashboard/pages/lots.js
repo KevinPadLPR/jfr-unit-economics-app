@@ -3,7 +3,7 @@ window.UEDash = window.UEDash || {};
 
 (function () {
   const { listGlLots } = window.UEDash;
-  const { statTileHtml, filterSelect, badgeHtml, showError, escapeHtml, ALL, lotLinkHtml } = window.UEDash;
+  const { statTileHtml, filterSelect, badgeHtml, showError, escapeHtml, ALL, lotLinkHtml, beginRender, isStaleRender } = window.UEDash;
   const { formatNumber, formatDate } = window.UEDash;
   const { headCountBarChart } = window.UEDash;
 
@@ -57,13 +57,15 @@ window.UEDash = window.UEDash || {};
   }
 
   async function renderLots(container) {
+    const token = beginRender(container);
     let lots;
     try {
       lots = await listGlLots();
     } catch (err) {
-      showError(container, err);
+      if (!isStaleRender(container, token)) showError(container, err);
       return;
     }
+    if (isStaleRender(container, token)) return;
 
     const open = lots.filter((l) => (l.status ?? "").toLowerCase() === "open");
     const closed = lots.filter((l) => (l.status ?? "").toLowerCase() === "closed");

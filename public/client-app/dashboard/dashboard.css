@@ -289,7 +289,10 @@ main:has(.dashboard-root) {
   border-bottom: 1px solid var(--border);
 }
 .dashboard-root table.data-table tbody tr:last-child td { border-bottom: none; }
-.dashboard-root table.data-table tbody tr:hover { background: color-mix(in srgb, var(--muted) 50%, transparent); }
+.dashboard-root table.data-table tbody tr:nth-child(even) { background: color-mix(in srgb, var(--muted) 35%, transparent); }
+.dashboard-root table.data-table tbody tr:hover { background: color-mix(in srgb, var(--muted) 65%, transparent); }
+.dashboard-root table.data-table td:first-child, .dashboard-root table.data-table th:first-child { padding-left: 1rem; }
+.dashboard-root table.data-table td:last-child, .dashboard-root table.data-table th:last-child { padding-right: 1rem; }
 .dashboard-root table.data-table tfoot tr td {
   border-top: 1px solid var(--border);
   background: var(--muted);
@@ -355,6 +358,13 @@ main:has(.dashboard-root) {
   background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .1rem .4rem;
 }
 
+/* Compact variant -- a small, right-aligned slicer sitting next to a page header instead of its
+   own full-width card (Overview and friends). Same interaction, just sized to sit inline. */
+.dashboard-root .period-slicer { width: 17rem; flex-shrink: 0; }
+.dashboard-root .range-slider-compact { margin: 1.5rem .6rem 0; height: 2rem; }
+.dashboard-root .range-slider-compact .range-slider-label { font-size: .7rem; padding: .05rem .35rem; bottom: 1rem; }
+.dashboard-root .range-slider-compact .range-slider-thumb { width: .95rem; height: .95rem; }
+
 /* ---- coloured header cells (e.g. Operations' month columns) -- a distinct background so a
    period header reads as a header, not another data cell. ---- */
-.dashboard-root table.data-table th.col-head-accent { background: var(--accent); color: var(--accent-foreground); }
+.dashboard-root table.data-table th.col-head-accent { background: var(--accent); color: var(--accent-foreground); white-space: nowrap; }

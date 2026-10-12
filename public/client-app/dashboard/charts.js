@@ -355,6 +355,42 @@ window.UEDash = window.UEDash || {};
     });
   }
 
+  /** Real settlement $/cwt, one point per sale event (data/market-data.js's getInternalSales) --
+   * category axis (one tick per real sale, same convention every other chart here uses for dates
+   * -- this app loads no Chart.js date-scale adapter, so a true time axis isn't available),
+   * nulls (weight not recorded) already excluded by the caller before this is called. */
+  function internalSalesChart(canvas, rows) {
+    destroyExisting(canvas);
+    return new Chart(canvas, {
+      type: "line",
+      data: {
+        labels: rows.map((r) => formatDate(r.sale_date)),
+        datasets: [
+          {
+            data: rows.map((r) => r.price_per_cwt),
+            borderColor: "transparent",
+            backgroundColor: CATEGORICAL.olive,
+            pointRadius: 5,
+            pointHoverRadius: 7,
+            showLine: false,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: { grid: { display: false }, ticks: { font: { size: 10 }, maxRotation: 30, minRotation: 30 } },
+          y: { grid: { color: GRID_COLOR }, ticks: { callback: (v) => `$${v}`, font: { size: 11 } } },
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (ctx) => `$${ctx.parsed.y.toFixed(2)}/cwt` } },
+        },
+      },
+    });
+  }
+
   Object.assign(window.UEDash, {
     stackedCostBarChart,
     unrealizedByLotChart,
@@ -366,5 +402,6 @@ window.UEDash = window.UEDash || {};
     cogAllInByLotChart,
     pricingHistoryChart,
     lotFlowBarChart,
+    internalSalesChart,
   });
 })();

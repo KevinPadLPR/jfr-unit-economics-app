@@ -3,18 +3,20 @@ window.UEDash = window.UEDash || {};
 
 (function () {
   const { getMarketPosition, getLatestFeederSettle } = window.UEDash;
-  const { reportUnavailableHtml, provenanceBadgeHtml, badgeHtml, showError, escapeHtml, lotLinkHtml } = window.UEDash;
+  const { reportUnavailableHtml, provenanceBadgeHtml, badgeHtml, showError, escapeHtml, lotLinkHtml, beginRender, isStaleRender } = window.UEDash;
   const { formatMoney, formatNumber, formatDate } = window.UEDash;
   const { unrealizedByLotChart } = window.UEDash;
 
   async function renderMarketPosition(container) {
+    const token = beginRender(container);
     let rows, settle;
     try {
       [rows, settle] = await Promise.all([getMarketPosition(), getLatestFeederSettle()]);
     } catch (err) {
-      showError(container, err);
+      if (!isStaleRender(container, token)) showError(container, err);
       return;
     }
+    if (isStaleRender(container, token)) return;
 
     const totalMarked = rows.reduce((s, r) => s + (r.markedValue ?? 0), 0);
     const totalCost = rows.reduce((s, r) => s + (r.costBasis ?? 0), 0);

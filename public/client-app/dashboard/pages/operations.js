@@ -8,7 +8,7 @@ window.UEDash = window.UEDash || {};
 (function () {
   const { listGlLots } = window.UEDash;
   const { getOperationsSummary, getMonthlyCostBreakdown } = window.UEDash;
-  const { statTileHtml, reportUnavailableHtml, filterSelect, showError, escapeHtml } = window.UEDash;
+  const { statTileHtml, reportUnavailableHtml, filterSelect, showError, escapeHtml, beginRender, isStaleRender } = window.UEDash;
   const { formatMoney, formatNumber, formatDate } = window.UEDash;
 
   const CATEGORY_ROWS = [
@@ -54,13 +54,15 @@ window.UEDash = window.UEDash || {};
   }
 
   async function renderOperations(container) {
+    const token = beginRender(container);
     let lots;
     try {
       lots = await listGlLots();
     } catch (err) {
-      showError(container, err);
+      if (!isStaleRender(container, token)) showError(container, err);
       return;
     }
+    if (isStaleRender(container, token)) return;
 
     const state = window.UEDash.dashState;
     const lot = state.lot && lots.some((l) => l.lot === state.lot) ? state.lot : lots[0]?.lot ?? null;
@@ -76,7 +78,7 @@ window.UEDash = window.UEDash || {};
           </div>
           <div id="lot-picker"></div>
         </div>
-        <div id="body"></div>
+        <div id="body"><p class="text-sm text-muted-foreground" style="padding:2rem;">Loading…</p></div>
       </div>`;
 
     container.querySelector("#lot-picker").append(
@@ -103,9 +105,10 @@ window.UEDash = window.UEDash || {};
     try {
       [summary, months] = await Promise.all([getOperationsSummary(lot), getMonthlyCostBreakdown(lot)]);
     } catch (err) {
-      showError(body, err);
+      if (!isStaleRender(container, token)) showError(body, err);
       return;
     }
+    if (isStaleRender(container, token)) return;
     if (!summary) {
       body.innerHTML = reportUnavailableHtml("No lot selected, or this lot has no GL data.");
       return;

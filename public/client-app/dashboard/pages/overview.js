@@ -8,7 +8,7 @@ window.UEDash = window.UEDash || {};
 
 (function () {
   const { getOverviewData } = window.UEDash;
-  const { reportUnavailableHtml, showError, escapeHtml, lotLinkHtml } = window.UEDash;
+  const { reportUnavailableHtml, showError, escapeHtml, lotLinkHtml, beginRender, isStaleRender } = window.UEDash;
   const { formatNumber, formatDate } = window.UEDash;
   const { headWaterfallChart } = window.UEDash;
 
@@ -82,13 +82,15 @@ window.UEDash = window.UEDash || {};
   }
 
   async function renderOverview(container) {
+    const token = beginRender(container);
     let months;
     try {
       months = await window.UEDash.getAvailableMonths();
     } catch (err) {
-      showError(container, err);
+      if (!isStaleRender(container, token)) showError(container, err);
       return;
     }
+    if (isStaleRender(container, token)) return;
     if (!months.length) {
       container.innerHTML = reportUnavailableHtml("No head-count history yet.");
       return;
@@ -106,20 +108,22 @@ window.UEDash = window.UEDash || {};
 
     container.innerHTML = `
       <div class="stack">
-        <div>
-          <h1 class="text-2xl font-semibold text-foreground">Overview</h1>
-          <p class="text-sm text-muted-foreground">Cattle inventory for a selected time period -- data available as of ${escapeHtml(formatDate(asOfDate))}.</p>
-        </div>
-        <div class="card" style="padding:0 1rem 1rem">
-          <div class="card-header"><p class="card-description">Time period</p></div>
-          <div class="range-slider" id="period-slider">
-            <div class="range-slider-track"></div>
-            <div class="range-slider-range"></div>
-            <button type="button" class="range-slider-thumb" data-thumb="from" title="Drag to change the start month"><span class="range-slider-label"></span></button>
-            <button type="button" class="range-slider-thumb" data-thumb="to" title="Drag to change the end month"><span class="range-slider-label"></span></button>
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 class="text-2xl font-semibold text-foreground">Overview</h1>
+            <p class="text-sm text-muted-foreground">Cattle inventory for a selected time period -- data available as of ${escapeHtml(formatDate(asOfDate))}.</p>
+          </div>
+          <div class="period-slicer">
+            <p class="text-xs text-muted-foreground text-right" style="margin:0">Time period</p>
+            <div class="range-slider range-slider-compact" id="period-slider">
+              <div class="range-slider-track"></div>
+              <div class="range-slider-range"></div>
+              <button type="button" class="range-slider-thumb" data-thumb="from" title="Drag to change the start month"><span class="range-slider-label"></span></button>
+              <button type="button" class="range-slider-thumb" data-thumb="to" title="Drag to change the end month"><span class="range-slider-label"></span></button>
+            </div>
           </div>
         </div>
-        <div id="body"></div>
+        <div id="body"><p class="text-sm text-muted-foreground" style="padding:2rem;">Loading…</p></div>
       </div>`;
 
     // Oldest-to-newest left-to-right, same direction as the slider reads.
@@ -135,9 +139,10 @@ window.UEDash = window.UEDash || {};
     try {
       data = await getOverviewData(fromMonth, toMonth);
     } catch (err) {
-      showError(body, err);
+      if (!isStaleRender(container, token)) showError(body, err);
       return;
     }
+    if (isStaleRender(container, token)) return;
     const { totals, rows } = data;
 
     body.innerHTML = `

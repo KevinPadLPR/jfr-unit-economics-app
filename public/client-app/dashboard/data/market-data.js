@@ -57,5 +57,19 @@ window.UEDash = window.UEDash || {};
     return (data ?? []).filter((p) => !p.notes || !String(p.notes).includes("VERIFICATION ROW"));
   }
 
+  /**
+   * "Internal" (own-basis/negotiated/cash-bid) pricing -- INVESTIGATED 2026-10-12, not built.
+   * Tried deriving it from real GL data alone (Revenue, report_section='Revenue' -> report_line
+   * 'Cattle Sales', divided by physical pounds sold from ue_gl_head_movements' 'Sold' rows) to
+   * avoid needing any new manual-entry table. Verified against real lots and rejected: even after
+   * excluding the Revenue section's other lines (Other Revenue/Insurance Proceeds/Crop Sales/
+   * Hedging Gain), Cattle Sales $ doesn't correspond cleanly to the same-event Sold lbs --
+   * event dates line up but implied $/cwt ranged from a plausible ~$320 to an impossible $1,900+
+   * across real lots checked. Something about how Cattle Sales revenue is recognized (accrual
+   * timing, batched settlement, grading adjustments -- not determined here) decouples it from a
+   * clean per-pound figure. Flagged to Kevin/John rather than shipped as a number; don't resurrect
+   * this approach without first understanding that discrepancy.
+   */
+
   Object.assign(window.UEDash, { MARKET_INSTRUMENTS: INSTRUMENTS, getPricingHistory, getFuturesCurve, getLrpPositions });
 })();

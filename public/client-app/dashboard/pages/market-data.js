@@ -106,9 +106,9 @@ window.UEDash = window.UEDash || {};
           <p class="text-sm text-muted-foreground">CME pricing and hedge coverage for the instruments JFR tracks.</p>
         </div>
         <div class="flex flex-wrap items-end justify-between gap-4">
-          <div class="flex gap-1">
-            <button type="button" class="btn btn-outline btn-sm" data-source="market">Market</button>
-            <button type="button" class="btn btn-outline btn-sm" data-source="internal">Internal</button>
+          <div class="pill-toggle">
+            <button type="button" data-source="market">Market</button>
+            <button type="button" data-source="internal">Internal</button>
           </div>
           <div id="instrument-picker"></div>
         </div>
@@ -124,7 +124,9 @@ window.UEDash = window.UEDash || {};
       })
     );
 
-    container.querySelector("#instrument-picker").append(
+    const instrumentPicker = container.querySelector("#instrument-picker");
+    instrumentPicker.classList.toggle("hidden", source === "internal");
+    instrumentPicker.append(
       filterSelect({
         label: "Instrument",
         value: instrument,
@@ -141,7 +143,7 @@ window.UEDash = window.UEDash || {};
     const marketBody = container.querySelector("#market-body");
     if (source === "internal") {
       marketBody.innerHTML = reportUnavailableHtml(
-        "No internal/own-basis pricing exists yet -- JFR's own negotiated or cash-bid prices aren't tracked anywhere in Supabase today. This selector will light up once that table exists; showing a CME number here instead would misrepresent it as JFR's own price."
+        "No internal/own-basis pricing exists yet -- JFR's own negotiated or cash-bid prices aren't tracked anywhere in Supabase today. (Checked whether a realized price could be derived from GL Revenue ÷ pounds sold instead: the Cattle Sales revenue line doesn't correspond cleanly to the Sold movement's weight event-by-event -- implied prices ranged from a plausible ~$320/cwt to an impossible $180,000+/cwt across real lots, so that path isn't reliable either without understanding why revenue recognition and physical movement diverge. Flagged for Kevin/John rather than shown as a number.) This selector will light up once a trustworthy source exists."
       );
     } else {
       await renderMarketSection(marketBody, instrument);

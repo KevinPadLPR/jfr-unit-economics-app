@@ -79,5 +79,58 @@ window.UEDash = window.UEDash || {};
     return { monthEnd, rows, totals: sumTotals(rows), byProfitCenter };
   }
 
-  Object.assign(window.UEDash, { getAvailableMonths, getInventorySnapshot });
+  /**
+   * Head movement for OPEN lots only, across a range of months (fromMonth..toMonth inclusive) --
+   * the Overview tab's "select a time period" slicer. Starting Balance is each lot's head_start on
+   * the EARLIEST month in range; Ending Balance is head_end on the LATEST month in range;
+   * everything else (purchased/born/transfers/sold/died) sums across every month in between --
+   * same additive convention this project's own Excel "All Lots" sheet already uses for $ figures
+   * (ALL_LOTS_ADDITIVE, Template/builder/build_template.py), applied here to head counts instead.
+   * A single month picked for both ends behaves exactly like getInventorySnapshot() above.
+   */
+  async function getOpenLotInventoryRange(fromMonth, toMonth) {
+    const [{ data: headDays, error: headDaysError }, { data: schedule, error: scheduleError }] = await Promise.all([
+      supabase
+        .from("ue_gl_head_days")
+        .select("lot, month_end, head_start, purchased, born, transfer_in, sold, died, transfer_out, head_end")
+        .gte("month_end", fromMonth)
+        .lte("month_end", toMonth)
+        .order("lot", { ascending: true })
+        .order("month_end", { ascending: true }),
+      supabase.from("ue_master_lot_schedule").select("lot, status, profit_center"),
+    ]);
+    if (headDaysError) throw headDaysError;
+    if (scheduleError) throw scheduleError;
+
+    // Case-insensitive, matching how every other page in this dashboard already checks "open".
+    const openLots = new Map((schedule ?? []).filter((s) => (s.status ?? "").toLowerCase() === "open").map((s) => [s.lot, s]));
+    const byLot = new Map();
+    for (const r of headDays ?? []) {
+      if (!openLots.has(r.lot)) continue; // closed-today lots excluded, per the sketch
+      if (!byLot.has(r.lot)) byLot.set(r.lot, []);
+      byLot.get(r.lot).push(r);
+    }
+
+    const rows = [...byLot.entries()].map(([lot, lotRows]) => {
+      const first = lotRows[0];
+      const last = lotRows[lotRows.length - 1];
+      const schedRow = openLots.get(lot);
+      return {
+        lot,
+        profitCenter: schedRow?.profit_center ?? null,
+        beginning: first.head_start ?? 0,
+        purchased: lotRows.reduce((s, r) => s + (r.purchased ?? 0), 0),
+        born: lotRows.reduce((s, r) => s + (r.born ?? 0), 0),
+        transferIn: lotRows.reduce((s, r) => s + (r.transfer_in ?? 0), 0),
+        transferOut: lotRows.reduce((s, r) => s + (r.transfer_out ?? 0), 0),
+        sold: lotRows.reduce((s, r) => s + (r.sold ?? 0), 0),
+        died: lotRows.reduce((s, r) => s + (r.died ?? 0), 0),
+        ending: last.head_end ?? 0,
+      };
+    });
+
+    return { fromMonth, toMonth, rows, totals: sumTotals(rows) };
+  }
+
+  Object.assign(window.UEDash, { getAvailableMonths, getInventorySnapshot, getOpenLotInventoryRange });
 })();

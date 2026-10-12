@@ -15,8 +15,9 @@ window.UEDash = window.UEDash || {};
 (function () {
   // Shared in-memory state replacing the standalone branch's ?lot=/?month= query params -- this
   // tab has no URL of its own to carry state in, and nothing else in this 40,000-line app reads
-  // window.location.search either.
-  const dashState = { lot: null, month: null };
+  // window.location.search either. overviewFrom/overviewTo are Overview's own time-period slicer
+  // (month/lot are shared across the other sub-tabs; Overview's range is its own concern).
+  const dashState = { lot: null, month: null, overviewFrom: null, overviewTo: null };
 
   const RENDERERS = {
     overview: "renderOverview",

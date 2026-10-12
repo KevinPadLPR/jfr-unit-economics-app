@@ -9,7 +9,8 @@ window.UEDash = window.UEDash || {};
   const { listGlLots } = window.UEDash;
   const { getLotFinancials } = window.UEDash;
   const { reportUnavailableHtml, showError, escapeHtml, filterSelect, ALL, beginRender, isStaleRender } = window.UEDash;
-  const { formatMoney, formatDate } = window.UEDash;
+  const { formatMoney } = window.UEDash;
+  const { financialCostRevenueChart, netIncomeByPeriodChart } = window.UEDash;
 
   const ROWS = [
     { key: "revenue", label: "Revenue" },
@@ -18,8 +19,13 @@ window.UEDash = window.UEDash || {};
     { key: "indirect", label: "Indirect" },
   ];
 
-  function periodLabel(period, value) {
-    return period === "week" ? formatDate(value) : formatDate(String(value).length === 7 ? `${value}-01` : value);
+  /** "SEP-2026" for months (same convention Operations' cost table already uses), "SEP 29" for
+   * weeks -- a week doesn't have its own "month" name, and the year rarely changes often enough
+   * within one visible stretch of weeks to need repeating on every single column. */
+  function periodHeaderLabel(period, value) {
+    const d = new Date(`${value}T00:00:00`);
+    if (period === "week") return `${d.toLocaleDateString("en-US", { month: "short" }).toUpperCase()} ${d.getDate()}`;
+    return `${d.toLocaleDateString("en-US", { month: "short" }).toUpperCase()}-${d.getFullYear()}`;
   }
 
   function renderTable(container, rows, period) {
@@ -28,11 +34,17 @@ window.UEDash = window.UEDash || {};
       return;
     }
     const total = (key) => rows.reduce((s, r) => s + r[key], 0);
+    const labels = rows.map((r) => periodHeaderLabel(period, r.period));
     container.innerHTML = `
+      <div class="stack" style="gap:1rem">
+        <div class="chart-box h-64"><canvas id="financial-cost-chart"></canvas></div>
+        <div class="chart-box h-48"><canvas id="financial-net-income-chart"></canvas></div>
+      </div>
+      <div class="table-wrap">
       <table class="data-table">
         <thead><tr>
           <th>$</th>
-          ${rows.map((r) => `<th class="text-right">${escapeHtml(periodLabel(period, r.period))}</th>`).join("")}
+          ${labels.map((l) => `<th class="text-right col-head-accent">${escapeHtml(l)}</th>`).join("")}
           <th class="text-right">Total</th>
         </tr></thead>
         <tbody>
@@ -50,7 +62,11 @@ window.UEDash = window.UEDash || {};
           ${rows.map((r) => `<td class="text-right" style="color:${r.netIncome >= 0 ? "#3f5c1f" : "#8a3115"}">${formatMoney(r.netIncome)}</td>`).join("")}
           <td class="text-right" style="color:${total("netIncome") >= 0 ? "#3f5c1f" : "#8a3115"}">${formatMoney(total("netIncome"))}</td>
         </tr></tfoot>
-      </table>`;
+      </table>
+      </div>`;
+
+    financialCostRevenueChart(container.querySelector("#financial-cost-chart"), rows, labels);
+    netIncomeByPeriodChart(container.querySelector("#financial-net-income-chart"), rows, labels);
   }
 
   async function renderFinancial(container) {
@@ -81,7 +97,7 @@ window.UEDash = window.UEDash || {};
         </div>
         <div class="card" style="overflow:hidden">
           <div class="card-header"><h3 class="card-title card-title-base">Revenue &amp; cost, by ${state.financialPeriod === "week" ? "week" : "month"}</h3><p class="card-description">Revenue less Cattle Cost, Direct and Indirect -- what's left is Net Income.</p></div>
-          <div class="table-wrap" id="financial-table"><p class="text-sm text-muted-foreground" style="padding:1rem;">Loading…</p></div>
+          <div id="financial-table"><p class="text-sm text-muted-foreground" style="padding:1rem;">Loading…</p></div>
         </div>
       </div>`;
 

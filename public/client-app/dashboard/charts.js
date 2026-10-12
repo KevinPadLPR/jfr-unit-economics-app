@@ -391,6 +391,69 @@ window.UEDash = window.UEDash || {};
     });
   }
 
+  /** Financial tab's "Revenue & cost" chart -- Cattle Cost/Direct/Indirect stacked (what it cost),
+   * Revenue as a line over the same bars (what came in), so the gap between the line and the top
+   * of each stack reads as the period's Net Income at a glance, same story the table below spells
+   * out in numbers. `labels` is pre-formatted by the caller (periodHeaderLabel), not formatDate --
+   * this chart doesn't know if it's looking at months or weeks. */
+  function financialCostRevenueChart(canvas, rows, labels) {
+    destroyExisting(canvas);
+    return new Chart(canvas, {
+      data: {
+        labels,
+        datasets: [
+          { type: "bar", label: "Cattle Cost", data: rows.map((r) => r.cattleCost), backgroundColor: CATEGORICAL.rust, stack: "cost" },
+          { type: "bar", label: "Direct", data: rows.map((r) => r.direct), backgroundColor: CATEGORICAL.olive, stack: "cost" },
+          { type: "bar", label: "Indirect", data: rows.map((r) => r.indirect), backgroundColor: CATEGORICAL.steelBlue, stack: "cost" },
+          { type: "line", label: "Revenue", data: rows.map((r) => r.revenue), borderColor: CATEGORICAL.plum, backgroundColor: "transparent", borderWidth: 2, pointRadius: 2, tension: 0.15 },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: { grid: { display: false }, ticks: { font: { size: 10 }, maxRotation: 30, minRotation: 30 } },
+          y: { grid: { color: GRID_COLOR }, ticks: { callback: (v) => formatMoney(v), font: { size: 11 } } },
+        },
+        plugins: {
+          legend: { position: "top", labels: { boxWidth: 12, font: { size: 11 } } },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${formatMoney(ctx.parsed.y)}` } },
+        },
+      },
+    });
+  }
+
+  /** Financial tab's Net Income chart -- one bar per period, green above zero / rust below,
+   * same divergent convention unrealizedByLotChart already uses for Market Position. */
+  function netIncomeByPeriodChart(canvas, rows, labels) {
+    destroyExisting(canvas);
+    return new Chart(canvas, {
+      type: "bar",
+      data: {
+        labels,
+        datasets: [
+          {
+            data: rows.map((r) => r.netIncome),
+            backgroundColor: rows.map((r) => (r.netIncome >= 0 ? DIVERGING.positive : DIVERGING.negative)),
+            borderRadius: 3,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: { grid: { display: false }, ticks: { font: { size: 10 }, maxRotation: 30, minRotation: 30 } },
+          y: { grid: { color: GRID_COLOR }, ticks: { callback: (v) => formatMoney(v), font: { size: 11 } } },
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (ctx) => `Net Income: ${formatMoney(ctx.parsed.y)}` } },
+        },
+      },
+    });
+  }
+
   Object.assign(window.UEDash, {
     stackedCostBarChart,
     unrealizedByLotChart,
@@ -403,5 +466,7 @@ window.UEDash = window.UEDash || {};
     pricingHistoryChart,
     lotFlowBarChart,
     internalSalesChart,
+    financialCostRevenueChart,
+    netIncomeByPeriodChart,
   });
 })();

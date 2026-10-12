@@ -70,6 +70,14 @@ window.UEDash = window.UEDash || {};
     if (isStaleRender(container, token)) return;
     const allLots = allLotsRaw.map((l) => ({ lot: l.lot, status: l.status }));
 
+    // A Sold row's own $/Head (ue_gl_head_movements.dollar_per_head) is cost relieved per head
+    // (COGS leaving inventory), not what the buyer actually paid -- confirmed 2026-10-12 while
+    // investigating Market Data's Internal price: that table's "lbs" is 0 on every Sold row (no
+    // real weight at all) and its "amount" is the cost-basis relief, not revenue. Showing a
+    // dollar figure in a "$/Head" column on a Sold row would read as a sale price when it isn't
+    // one, so it's suppressed here rather than displayed misleadingly. The client's own `sales`
+    // table has the real thing (price_per_head from an audited settlement), but joining it to a GL
+    // lot needs the app/GL lot crosswalk this dashboard doesn't resolve yet -- not done here.
     const activityRow = (row) => `
       <tr>
         <td>${formatDate(row.date)}</td>
@@ -77,7 +85,7 @@ window.UEDash = window.UEDash || {};
         <td class="text-right">${row.head != null ? formatNumber(row.head) : "-"}</td>
         <td class="text-right">${row.weight ? `${formatNumber(row.weight)} lb` : "-"}</td>
         <td class="text-right">${formatMoney(row.amount)}</td>
-        <td class="text-right">${row.dollarsPerHead != null ? formatMoney(row.dollarsPerHead, { cents: true }) : "-"}</td>
+        <td class="text-right" title="${row.type === "Sold" ? "Cost relieved per head, not the sale price -- real weight/price aren't recorded on this GL row." : ""}">${row.type !== "Sold" && row.dollarsPerHead != null ? formatMoney(row.dollarsPerHead, { cents: true }) : "-"}</td>
         <td class="truncate" style="max-width:20rem" title="${escapeHtml(row.notes ?? "")}">${row.notes ? escapeHtml(row.notes) : "-"}</td>
       </tr>`;
 

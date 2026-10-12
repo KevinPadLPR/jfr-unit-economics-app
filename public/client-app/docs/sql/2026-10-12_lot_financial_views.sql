@@ -43,13 +43,17 @@ comment on view public.ue_gl_lot_month_cost is
 --    dollars only, never $/lb (Indirect posts month-end only, so a weekly $/lb would show a false
 --    monthly spike -- same reason this view has always been dollars-only).
 -- =====================================================================
+-- Column order matters here: CREATE OR REPLACE VIEW can only append new columns at the end of the
+-- existing list, not insert them in the middle (Postgres error 42P16 otherwise) -- so direct/
+-- indirect stay in their original positions (2026-10-06 migration) and revenue/cattle_cost are
+-- added after them, not before.
 create or replace view public.ue_gl_lot_week_cost
 with (security_invoker = true) as
 select lot, week_end,
-       round(sum(case when report_section = 'Revenue' then report_amount else 0 end), 2) as revenue,
-       round(sum(case when report_section = 'Cattle'   then report_amount else 0 end), 2) as cattle_cost,
        round(sum(case when report_section = 'Direct'   then report_amount else 0 end), 2) as direct,
-       round(sum(case when report_section = 'Indirect' then report_amount else 0 end), 2) as indirect
+       round(sum(case when report_section = 'Indirect' then report_amount else 0 end), 2) as indirect,
+       round(sum(case when report_section = 'Revenue' then report_amount else 0 end), 2) as revenue,
+       round(sum(case when report_section = 'Cattle'   then report_amount else 0 end), 2) as cattle_cost
   from public.ue_gl_transactions
  where lot is not null and week_end is not null
  group by lot, week_end;

@@ -308,6 +308,53 @@ window.UEDash = window.UEDash || {};
     });
   }
 
+  /**
+   * Pricing history -- one line per contract month, X = quote date, Y = settle. Deliberately NOT
+   * a single rolled "front month" series: that would require us to invent a roll convention this
+   * table doesn't specify, so every real contract's own curve is shown instead, same as a CME
+   * quote board.
+   */
+  function pricingHistoryChart(canvas, rows, { unitSuffix = "" } = {}) {
+    destroyExisting(canvas);
+    const byMonth = new Map();
+    for (const r of rows) {
+      if (!byMonth.has(r.contract_month)) byMonth.set(r.contract_month, []);
+      byMonth.get(r.contract_month).push(r);
+    }
+    const allDates = [...new Set(rows.map((r) => r.quote_date))].sort();
+    const palette = [CATEGORICAL.rust, CATEGORICAL.steelBlue, CATEGORICAL.olive, CATEGORICAL.plum];
+    const months = [...byMonth.keys()].sort();
+    const datasets = months.map((month, i) => {
+      const byDate = new Map(byMonth.get(month).map((r) => [r.quote_date, r.settle]));
+      return {
+        label: formatDate(month),
+        data: allDates.map((d) => byDate.get(d) ?? null),
+        borderColor: palette[i % palette.length],
+        backgroundColor: "transparent",
+        spanGaps: true,
+        pointRadius: 0,
+        borderWidth: 2,
+      };
+    });
+
+    return new Chart(canvas, {
+      type: "line",
+      data: { labels: allDates.map((d) => formatDate(d)), datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: { grid: { display: false }, ticks: { font: { size: 10 }, maxTicksLimit: 10 } },
+          y: { grid: { color: GRID_COLOR }, ticks: { callback: (v) => `${v}${unitSuffix}`, font: { size: 11 } } },
+        },
+        plugins: {
+          legend: { position: "top", labels: { boxWidth: 12, font: { size: 11 } } },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y}${unitSuffix}` } },
+        },
+      },
+    });
+  }
+
   Object.assign(window.UEDash, {
     stackedCostBarChart,
     unrealizedByLotChart,
@@ -317,6 +364,7 @@ window.UEDash = window.UEDash || {};
     headWaterfallChart,
     monthlyHeadAreaChart,
     cogAllInByLotChart,
+    pricingHistoryChart,
     lotFlowBarChart,
   });
 })();

@@ -1,15 +1,14 @@
 /**
  * Unit Economics dashboard -- Financial sub-tab (Client Files/Tab2-Financial.jpg). Lot selection
- * and Monthly/Weekly period are this page's own state (window.UEDash.dashState.financialLots/
- * financialPeriod) -- not shared with Cost of Gain/Lot Detail's single-lot dashState.lot, since
- * this page supports selecting several lots (or all of them) at once.
+ * and Monthly/Weekly period are this page's own state (window.UEDash.dashState.financialLot/
+ * financialPeriod) -- not shared with Cost of Gain/Lot Detail's single-lot dashState.lot.
  */
 window.UEDash = window.UEDash || {};
 
 (function () {
   const { listGlLots } = window.UEDash;
   const { getLotFinancials } = window.UEDash;
-  const { reportUnavailableHtml, showError, escapeHtml } = window.UEDash;
+  const { reportUnavailableHtml, showError, escapeHtml, filterSelect, ALL } = window.UEDash;
   const { formatMoney, formatDate } = window.UEDash;
 
   const ROWS = [
@@ -72,21 +71,11 @@ window.UEDash = window.UEDash || {};
           <p class="text-sm text-muted-foreground">Revenue, cost and net income -- one lot, several, or the whole ranch.</p>
         </div>
         <div class="flex flex-wrap items-end gap-4">
-          <label class="field" style="width:19rem">
-            <span class="flex items-center" style="justify-content:space-between">
-              <span>Lots</span>
-              <span style="display:flex;align-items:center;gap:.35rem;font-weight:normal;white-space:nowrap">
-                <input type="checkbox" id="all-lots-toggle" ${state.financialLots === null ? "checked" : ""} /> All lots
-              </span>
-            </span>
-            <select id="lots-select" multiple size="5" title="Ctrl/shift-click to select several" ${state.financialLots === null ? "disabled" : ""}>
-              ${lots.map((l) => `<option value="${escapeHtml(l.lot)}" ${state.financialLots?.includes(l.lot) ? "selected" : ""}>${escapeHtml(l.lot)}${l.status ? ` (${escapeHtml(l.status)})` : ""}</option>`).join("")}
-            </select>
-          </label>
-          <div class="flex gap-1">
-            <button type="button" class="btn btn-outline btn-sm ${state.financialPeriod === "month" ? "active" : ""}" data-period="month">Monthly</button>
-            <button type="button" class="btn btn-outline btn-sm ${state.financialPeriod === "week" ? "active" : ""}" data-period="week">Weekly</button>
+          <div class="pill-toggle" id="period-toggle">
+            <button type="button" data-period="month" class="${state.financialPeriod === "month" ? "active" : ""}">Monthly</button>
+            <button type="button" data-period="week" class="${state.financialPeriod === "week" ? "active" : ""}">Weekly</button>
           </div>
+          <div id="lot-picker"></div>
         </div>
         <div class="card" style="overflow:hidden">
           <div class="card-header"><h3 class="card-title card-title-base">Revenue &amp; cost, by ${state.financialPeriod === "week" ? "week" : "month"}</h3><p class="card-description">Revenue less Cattle Cost, Direct and Indirect -- what's left is Net Income.</p></div>
@@ -94,14 +83,19 @@ window.UEDash = window.UEDash || {};
         </div>
       </div>`;
 
-    container.querySelector("#all-lots-toggle").addEventListener("change", (e) => {
-      state.financialLots = e.target.checked ? null : [];
-      renderFinancial(container);
-    });
-    container.querySelector("#lots-select").addEventListener("change", (e) => {
-      state.financialLots = [...e.target.selectedOptions].map((o) => o.value);
-      renderFinancial(container);
-    });
+    container.querySelector("#lot-picker").append(
+      filterSelect({
+        label: "Lot",
+        value: state.financialLot,
+        options: lots.map((l) => ({ value: l.lot, label: `${l.lot}${l.status ? ` (${l.status})` : ""}` })),
+        allowAll: true,
+        className: "w-64",
+        onChange: (value) => {
+          state.financialLot = value;
+          renderFinancial(container);
+        },
+      })
+    );
     container.querySelectorAll("[data-period]").forEach((btn) =>
       btn.addEventListener("click", () => {
         state.financialPeriod = btn.dataset.period;
@@ -112,7 +106,7 @@ window.UEDash = window.UEDash || {};
     const tableHost = container.querySelector("#financial-table");
     let rows;
     try {
-      rows = await getLotFinancials({ lots: state.financialLots, period: state.financialPeriod });
+      rows = await getLotFinancials({ lots: state.financialLot === ALL ? null : [state.financialLot], period: state.financialPeriod });
     } catch (err) {
       showError(tableHost, err);
       return;

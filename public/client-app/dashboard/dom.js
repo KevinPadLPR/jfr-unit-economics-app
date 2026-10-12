@@ -37,9 +37,16 @@ window.UEDash = window.UEDash || {};
     assumed: "Projected, e.g. flat ADG, assumed death-loss %",
   };
 
-  /** Position Desk spec Rule 1: every number carries a provenance label. */
+  /**
+   * Position Desk spec Rule 1: every non-measured number carries a provenance label.
+   * "measured" itself is deliberately NOT badged (2026-10-12): now that the inferred/assumed
+   * fields this rule used to need to distinguish from are gone, every number on this dashboard is
+   * measured or derived from real GL/client data by default -- flagging that as special on every
+   * tile would just be noise. MODELED/SOURCED/ASSUMED still mean something different and keep
+   * their badge.
+   */
   function provenanceBadgeHtml(provenance) {
-    if (!provenance) return "";
+    if (!provenance || provenance === "measured") return "";
     const color = PROVENANCE[provenance];
     return `<span class="prov-badge" style="border-color:${color};color:${color}" title="${PROV_TITLE[provenance]}">${PROV_LABEL[provenance]}</span>`;
   }

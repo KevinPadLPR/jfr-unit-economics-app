@@ -19,13 +19,20 @@ window.UEDash = window.UEDash || {};
     { key: "other", label: "Other" },
   ];
 
+  /** "SEP-2026", not "Sep 31, 2026" -- a full date reads as noise in a column header that's
+   * really just naming a month. */
+  function monthHeaderLabel(monthKey) {
+    const d = new Date(`${monthKey}-01T00:00:00`);
+    return `${d.toLocaleDateString("en-US", { month: "short" }).toUpperCase()}-${d.getFullYear()}`;
+  }
+
   function renderBreakdownTable(container, months, headIn, perHead) {
     const money = (n) => (perHead ? formatMoney(headIn > 0 ? n / headIn : null, { cents: true }) : formatMoney(n));
     container.innerHTML = `
       <table class="data-table">
         <thead><tr>
           <th>Cost</th>
-          ${months.map((m) => `<th class="text-right">${escapeHtml(formatDate(m.month + "-01"))}</th>`).join("")}
+          ${months.map((m) => `<th class="text-right col-head-accent">${escapeHtml(monthHeaderLabel(m.month))}</th>`).join("")}
           <th class="text-right">Total</th>
         </tr></thead>
         <tbody>
@@ -120,9 +127,9 @@ window.UEDash = window.UEDash || {};
         <div class="card" style="overflow:hidden">
           <div class="card-header card-header-row">
             <div><h3 class="card-title card-title-base">Cost, by month</h3><p class="card-description">Purchase, medicine, freight, feed and everything else, month by month.</p></div>
-            <div class="flex gap-1">
-              <button type="button" class="btn btn-outline btn-sm ${!perHead ? "active" : ""}" data-per-head="false">Total $</button>
-              <button type="button" class="btn btn-outline btn-sm ${perHead ? "active" : ""}" data-per-head="true">Per head</button>
+            <div class="pill-toggle">
+              <button type="button" data-per-head="false" class="${!perHead ? "active" : ""}">Total $</button>
+              <button type="button" data-per-head="true" class="${perHead ? "active" : ""}">Per head</button>
             </div>
           </div>
           <div class="table-wrap" id="breakdown-table"></div>

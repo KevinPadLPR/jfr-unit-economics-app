@@ -27,7 +27,7 @@ window.UEDash = window.UEDash || {};
     marketInstrument: null,
     marketSource: null,
     opsPerHead: false,
-    financialLots: null,
+    financialLot: window.UEDash.ALL,
     financialPeriod: "month",
   };
 

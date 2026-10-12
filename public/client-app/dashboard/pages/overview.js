@@ -8,8 +8,78 @@ window.UEDash = window.UEDash || {};
 
 (function () {
   const { getOverviewData } = window.UEDash;
-  const { statTileHtml, reportUnavailableHtml, filterSelect, showError, escapeHtml, lotLinkHtml } = window.UEDash;
+  const { reportUnavailableHtml, showError, escapeHtml, lotLinkHtml } = window.UEDash;
   const { formatNumber, formatDate } = window.UEDash;
+  const { headWaterfallChart } = window.UEDash;
+
+  /**
+   * Draggable dual-handle period slicer (Power BI style) over the fixed list of months with real
+   * head-count data -- there's no continuous date axis here, every position snaps to one of
+   * `months`. Only the label/thumb position update live while dragging; the actual data refetch
+   * (onCommit) fires once per drag, on pointerup, same as a real BI tool debounces this.
+   */
+  function wireRangeSlider(host, months, fromMonth, toMonth, onCommit) {
+    const n = months.length;
+    let fromIdx = Math.max(0, months.indexOf(fromMonth));
+    let toIdx = Math.max(fromIdx, months.indexOf(toMonth));
+
+    const range = host.querySelector(".range-slider-range");
+    const fromThumb = host.querySelector('[data-thumb="from"]');
+    const toThumb = host.querySelector('[data-thumb="to"]');
+    const fromLabel = fromThumb.querySelector(".range-slider-label");
+    const toLabel = toThumb.querySelector(".range-slider-label");
+
+    const pct = (i) => (n <= 1 ? 0 : (i / (n - 1)) * 100);
+    // When both handles land on the same month (the common initial single-month view), they'd
+    // sit at the exact same pixel and only the topmost one could ever be grabbed again. A few
+    // pixels of push-apart keeps both independently draggable without changing the logical
+    // (snapped-to-month) position either represents.
+    const OVERLAP_PUSH_PX = 5;
+
+    function paint() {
+      const overlapping = fromIdx === toIdx;
+      fromThumb.style.left = `${pct(fromIdx)}%`;
+      toThumb.style.left = `${pct(toIdx)}%`;
+      fromThumb.style.marginLeft = overlapping ? `-${OVERLAP_PUSH_PX}px` : "0";
+      toThumb.style.marginLeft = overlapping ? `${OVERLAP_PUSH_PX}px` : "0";
+      range.style.left = `${pct(fromIdx)}%`;
+      range.style.width = `${pct(toIdx) - pct(fromIdx)}%`;
+      fromLabel.textContent = formatDate(months[fromIdx]);
+      toLabel.textContent = formatDate(months[toIdx]);
+    }
+    paint();
+
+    function indexFromClientX(clientX) {
+      const rect = host.getBoundingClientRect();
+      const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+      return Math.round(ratio * (n - 1));
+    }
+
+    function startDrag(which) {
+      return (downEvent) => {
+        downEvent.preventDefault();
+        downEvent.stopPropagation();
+        fromThumb.style.zIndex = which === "from" ? "2" : "1";
+        toThumb.style.zIndex = which === "to" ? "2" : "1";
+        const move = (e) => {
+          const idx = indexFromClientX(e.clientX);
+          if (which === "from") fromIdx = Math.min(idx, toIdx);
+          else toIdx = Math.max(idx, fromIdx);
+          paint();
+        };
+        const up = () => {
+          document.removeEventListener("pointermove", move);
+          document.removeEventListener("pointerup", up);
+          onCommit(months[fromIdx], months[toIdx]);
+        };
+        document.addEventListener("pointermove", move);
+        document.addEventListener("pointerup", up, { once: true });
+      };
+    }
+
+    fromThumb.addEventListener("pointerdown", startDrag("from"));
+    toThumb.addEventListener("pointerdown", startDrag("to"));
+  }
 
   async function renderOverview(container) {
     let months;
@@ -40,41 +110,25 @@ window.UEDash = window.UEDash || {};
           <h1 class="text-2xl font-semibold text-foreground">Overview</h1>
           <p class="text-sm text-muted-foreground">Cattle inventory for a selected time period -- data available as of ${escapeHtml(formatDate(asOfDate))}.</p>
         </div>
-        <div class="flex flex-wrap items-end gap-3">
-          <div id="from-picker"></div>
-          <div id="to-picker"></div>
+        <div class="card" style="padding:0 1rem 1rem">
+          <div class="card-header"><p class="card-description">Time period</p></div>
+          <div class="range-slider" id="period-slider">
+            <div class="range-slider-track"></div>
+            <div class="range-slider-range"></div>
+            <button type="button" class="range-slider-thumb" data-thumb="from" title="Drag to change the start month"><span class="range-slider-label"></span></button>
+            <button type="button" class="range-slider-thumb" data-thumb="to" title="Drag to change the end month"><span class="range-slider-label"></span></button>
+          </div>
         </div>
         <div id="body"></div>
       </div>`;
 
-    const monthOptions = months.map((m) => ({ value: m, label: formatDate(m) })).reverse(); // oldest first in the dropdowns, newest first is only for "as of"
-
-    container.querySelector("#from-picker").append(
-      filterSelect({
-        label: "Time period from",
-        value: fromMonth,
-        options: monthOptions,
-        allowAll: false,
-        className: "w-48",
-        onChange: (value) => {
-          state.overviewFrom = value;
-          renderOverview(container);
-        },
-      })
-    );
-    container.querySelector("#to-picker").append(
-      filterSelect({
-        label: "to",
-        value: toMonth,
-        options: monthOptions.filter((o) => o.value >= fromMonth),
-        allowAll: false,
-        className: "w-48",
-        onChange: (value) => {
-          state.overviewTo = value;
-          renderOverview(container);
-        },
-      })
-    );
+    // Oldest-to-newest left-to-right, same direction as the slider reads.
+    const monthsAsc = months.slice().reverse();
+    wireRangeSlider(container.querySelector("#period-slider"), monthsAsc, fromMonth, toMonth, (newFrom, newTo) => {
+      state.overviewFrom = newFrom;
+      state.overviewTo = newTo;
+      renderOverview(container);
+    });
 
     const body = container.querySelector("#body");
     let data;
@@ -85,21 +139,12 @@ window.UEDash = window.UEDash || {};
       return;
     }
     const { totals, rows } = data;
-    const netChange = totals.ending - totals.beginning;
 
     body.innerHTML = `
       <div class="stack">
-        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-          ${statTileHtml({ label: "Starting balance", value: formatNumber(totals.beginning), provenance: "measured" })}
-          ${statTileHtml({ label: "Ending balance", value: formatNumber(totals.ending), provenance: "measured" })}
-          ${statTileHtml({
-            label: "Net change",
-            value: `${netChange >= 0 ? "+" : ""}${formatNumber(netChange)}`,
-            deltaTone: netChange >= 0 ? "good" : "bad",
-            provenance: "measured",
-          })}
-          ${statTileHtml({ label: "Purchased", value: formatNumber(totals.purchased), provenance: "measured" })}
-          ${statTileHtml({ label: "Died", value: formatNumber(totals.died), provenance: "measured" })}
+        <div class="card">
+          <div class="card-header"><h3 class="card-title card-title-base">Cattle inventory movement</h3><p class="card-description">Starting balance to ending balance, every inflow and outflow in between, for the selected period.</p></div>
+          <div class="chart-box h-72"><canvas id="movement-chart"></canvas></div>
         </div>
         <div class="card" style="overflow:hidden">
           <div class="card-header"><h3 class="card-title card-title-base">Open lots</h3><p class="card-description">Every lot open today, head movement for the selected period.</p></div>
@@ -146,6 +191,8 @@ window.UEDash = window.UEDash || {};
           </div>
         </div>
       </div>`;
+
+    headWaterfallChart(body.querySelector("#movement-chart"), totals);
   }
 
   Object.assign(window.UEDash, { renderOverview });

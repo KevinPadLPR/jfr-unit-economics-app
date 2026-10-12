@@ -19,15 +19,25 @@ window.UEDash = window.UEDash || {};
     return /schema cache|does not exist/i.test(error.message ?? "");
   }
 
+  /** PostgREST caps a single request at 1000 rows (this project's db.max_rows). "All lots" has no
+   * lot filter to shrink it -- confirmed 2026-10-12 that ue_gl_lot_week_cost alone is 1,272 rows
+   * ranch-wide, over that cap -- so this pages through with .range() until a page comes back
+   * short, same fix already applied to Market Data's Internal investigation for the same reason. */
   async function queryFinancials(table, periodCol, lots) {
-    let query = supabase.from(table).select(`lot, ${periodCol}, revenue, cattle_cost, direct, indirect`);
-    if (lots && lots.length) query = query.in("lot", lots);
-    const { data, error } = await query.order(periodCol, { ascending: true });
-    if (error) {
-      if (isViewMissing(error)) return null;
-      throw error;
+    const pageSize = 1000;
+    let rows = [];
+    for (let from = 0; ; from += pageSize) {
+      let query = supabase.from(table).select(`lot, ${periodCol}, revenue, cattle_cost, direct, indirect`);
+      if (lots && lots.length) query = query.in("lot", lots);
+      const { data, error } = await query.order(periodCol, { ascending: true }).range(from, from + pageSize - 1);
+      if (error) {
+        if (isViewMissing(error)) return null;
+        throw error;
+      }
+      rows = rows.concat(data ?? []);
+      if (!data || data.length < pageSize) break;
     }
-    return data ?? [];
+    return rows;
   }
 
   /**

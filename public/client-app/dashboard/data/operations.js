@@ -24,8 +24,7 @@
 window.UEDash = window.UEDash || {};
 
 (function () {
-  const { getGlLotSummary, getCostOfGain, getTotalCostToDate } = window.UEDash;
-  const { getLotAttrsRollup } = window.UEDash;
+  const { getGlLotSummary, getCostOfGain } = window.UEDash;
   const { FEED_FORAGE_LINES } = window.UEDash;
 
   const MEDICINE_LINES = new Set(["Medicine", "Processing"]);
@@ -78,16 +77,20 @@ window.UEDash = window.UEDash || {};
    * available as of" date, GL-measured) rather than today's wall-clock date -- using the system
    * clock would not be derived from GL/client data at all, just whatever happens to be open when
    * someone loads the page.
+   *
+   * Performance (2026-10-12): summary and getCostOfGain don't depend on each other, so they run in
+   * parallel. isMeasured/adgUsed/adgSourceDetail/totalCostToDate all come straight off cog's own
+   * return value instead of this function fetching attrs and total-cost-to-date a second time --
+   * getCostOfGain already computes both from data it fetches anyway.
    */
   async function getOperationsSummary(lot) {
-    const summary = await getGlLotSummary(lot);
+    const [summary, cog] = await Promise.all([getGlLotSummary(lot), getCostOfGain(lot)]);
     if (!summary) return undefined;
-
-    const [cog, attrs, totalCostToDate] = await Promise.all([getCostOfGain(lot), getLotAttrsRollup(lot), getTotalCostToDate(lot)]);
 
     const daysOnFeed = summary.date_in && summary.books_through ? Math.round((new Date(summary.books_through) - new Date(summary.date_in)) / 86400000) : null;
     const startingWeight = summary.avg_wt_in ?? null;
-    const estimatedWeight = attrs.isMeasured && startingWeight != null && daysOnFeed != null ? startingWeight + daysOnFeed * attrs.adgUsed : null;
+    const isMeasured = cog?.isMeasured ?? false;
+    const estimatedWeight = isMeasured && startingWeight != null && daysOnFeed != null ? startingWeight + daysOnFeed * cog.adgUsed : null;
 
     return {
       lot,
@@ -96,11 +99,11 @@ window.UEDash = window.UEDash || {};
       daysOnFeed,
       startingWeight,
       estimatedWeight,
-      isMeasured: attrs.isMeasured,
-      adgSourceDetail: attrs.adgSourceDetail,
-      adgUsed: attrs.isMeasured ? attrs.adgUsed : null,
+      isMeasured,
+      adgSourceDetail: cog?.adgSourceDetail ?? null,
+      adgUsed: isMeasured ? cog.adgUsed : null,
       cogAllIn: cog?.cogAllIn ?? null,
-      totalCostToDate,
+      totalCostToDate: cog?.totalCostToDate ?? 0,
       headIn: summary.head_in ?? 0,
     };
   }

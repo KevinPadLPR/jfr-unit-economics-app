@@ -16,22 +16,30 @@ window.UEDash = window.UEDash || {};
   const DEATH_LOSS_LINE = "Death Loss";
   const LRP_LINE = "LRP Insurance";
 
-  /**
-   * ue_gl_lot_report_line_summary (Supabase view) is already grouped by (lot, report_section,
-   * report_line) -- this sums a handful of pre-aggregated rows in application code instead of a
-   * parameterized SQL filter, which views can't take cleanly.
-   */
-  async function sumReportAmount(lot, opts = {}) {
+  /** One lot's whole ue_gl_lot_report_line_summary row set -- every sum below this point
+   * (sumReportAmount, getTotalCostToDate, getDirectCostBreakdown, Cost of Gain's half-dozen
+   * category totals) is just a different filter/reduce over these same rows. Fetched once and
+   * reused rather than re-querying per category -- getCostOfGain used to make 6 separate round
+   * trips to this exact table for one lot; this is the fix. */
+  async function getReportLineRows(lot) {
     const { data, error } = await supabase.from("ue_gl_lot_report_line_summary").select("report_line, report_section, total").eq("lot", lot);
     if (error) throw error;
+    return data ?? [];
+  }
 
-    const rows = data ?? [];
+  function sumRows(rows, opts = {}) {
     const filtered = rows.filter((r) => {
       if (opts.reportLines?.length) return opts.reportLines.includes(r.report_line);
       if (opts.reportSection) return r.report_section === opts.reportSection;
       return false;
     });
     return filtered.reduce((s, r) => s + (r.total ?? 0), 0);
+  }
+
+  /** Single-category convenience wrapper over getReportLineRows, for the few callers (lot-sheet's
+   * one-off Revenue total) that only need one number and aren't already holding the full row set. */
+  async function sumReportAmount(lot, opts = {}) {
+    return sumRows(await getReportLineRows(lot), opts);
   }
 
   /** All Direct-section cost, grouped by line -- used for the Cost of Gain breakdown chart. */
@@ -100,6 +108,8 @@ window.UEDash = window.UEDash || {};
     HEALTH_LINES,
     DEATH_LOSS_LINE,
     LRP_LINE,
+    getReportLineRows,
+    sumRows,
     sumReportAmount,
     getTotalCostToDate,
     getTotalCostToDateByLot,
